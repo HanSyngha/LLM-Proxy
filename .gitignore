@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+*.log
+packages/api/tsconfig.tsbuildinfo
+.DS_Store
+cert/

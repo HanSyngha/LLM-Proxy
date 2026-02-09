@@ -1,0 +1,356 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// User
+// ============================================
+model User {
+  id           String   @id @default(uuid())
+  loginid      String   @unique
+  username     String
+  deptname     String   @default("")
+  businessUnit String?  @map("business_unit")
+  firstSeen    DateTime @default(now()) @map("first_seen")
+  lastActive   DateTime @default(now()) @map("last_active")
+  isActive     Boolean  @default(true) @map("is_active")
+  isBanned     Boolean  @default(false) @map("is_banned")
+  bannedReason String?  @map("banned_reason")
+  monthlyOutputTokenBudget Int? @map("monthly_output_token_budget")
+
+  apiTokens       ApiToken[]
+  usageLogs       UsageLog[]
+  dailyUsageStats DailyUsageStat[]
+
+  @@index([loginid])
+  @@index([lastActive])
+  @@index([isActive])
+  @@map("users")
+}
+
+// ============================================
+// API Token (sk-xxx format)
+// ============================================
+model ApiToken {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  name           String
+  prefix         String    @unique
+  hashedKey      String    @unique @map("hashed_key")
+  enabled        Boolean   @default(true)
+  expiresAt      DateTime? @map("expires_at")
+  lastUsedAt     DateTime? @map("last_used_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  rpmLimit       Int?      @map("rpm_limit")
+  tpmLimit       Int?      @map("tpm_limit")
+  tphLimit       Int?      @map("tph_limit")
+  tpdLimit       Int?      @map("tpd_limit")
+
+  monthlyOutputTokenBudget Int? @map("monthly_output_token_budget")
+  allowedModels  String[]  @default([]) @map("allowed_models")
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usageLogs      UsageLog[]
+  requestLogs    RequestLog[]
+
+  @@index([userId])
+  @@index([prefix])
+  @@index([hashedKey])
+  @@index([enabled])
+  @@index([expiresAt])
+  @@map("api_tokens")
+}
+
+// ============================================
+// LLM Model Configuration
+// ============================================
+model Model {
+  id               String   @id @default(uuid())
+  name             String   @unique
+  displayName      String   @map("display_name")
+  alias            String?  @unique
+  endpointUrl      String   @map("endpoint_url")
+  apiKey           String?  @map("api_key")
+  extraHeaders     Json?    @map("extra_headers")
+  maxTokens        Int      @default(128000) @map("max_tokens")
+  enabled          Boolean  @default(true)
+  sortOrder        Int      @default(0) @map("sort_order")
+  createdAt        DateTime @default(now()) @map("created_at")
+  createdBy        String?  @map("created_by")
+
+  creator          Admin?   @relation(fields: [createdBy], references: [id])
+  subModels        SubModel[]
+  usageLogs        UsageLog[]
+  dailyUsageStats  DailyUsageStat[]
+
+  @@index([alias])
+  @@index([enabled])
+  @@index([sortOrder])
+  @@map("models")
+}
+
+// ============================================
+// SubModel (Load Balancing Endpoints)
+// ============================================
+model SubModel {
+  id          String   @id @default(uuid())
+  parentId    String   @map("parent_id")
+  modelName   String?  @map("model_name")
+  endpointUrl String   @map("endpoint_url")
+  apiKey      String?  @map("api_key")
+  extraHeaders Json?   @map("extra_headers")
+  enabled     Boolean  @default(true)
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  parent      Model    @relation(fields: [parentId], references: [id], onDelete: Cascade)
+
+  @@index([parentId])
+  @@map("sub_models")
+}
+
+// ============================================
+// Admin
+// ============================================
+model Admin {
+  id        String    @id @default(uuid())
+  loginid   String    @unique
+  role      AdminRole @default(ADMIN)
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  models    Model[]
+
+  @@map("admins")
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  VIEWER
+}
+
+// ============================================
+// Usage Log (per-request)
+// ============================================
+model UsageLog {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  modelId      String   @map("model_id")
+  apiTokenId   String?  @map("api_token_id")
+  inputTokens  Int      @default(0) @map("input_tokens")
+  outputTokens Int      @default(0) @map("output_tokens")
+  totalTokens  Int      @default(0) @map("total_tokens")
+  latencyMs    Int?     @map("latency_ms")
+  timestamp    DateTime @default(now())
+  deptname     String   @default("")
+  businessUnit String?  @map("business_unit")
+
+  user         User     @relation(fields: [userId], references: [id])
+  model        Model    @relation(fields: [modelId], references: [id])
+  apiToken     ApiToken? @relation(fields: [apiTokenId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([modelId])
+  @@index([apiTokenId])
+  @@index([timestamp])
+  @@index([userId, timestamp])
+  @@index([modelId, timestamp])
+  @@index([apiTokenId, timestamp])
+  @@map("usage_logs")
+}
+
+// ============================================
+// Daily Usage Stat (aggregated)
+// ============================================
+model DailyUsageStat {
+  id                String   @id @default(uuid())
+  date              DateTime @db.Date
+  userId            String   @map("user_id")
+  modelId           String   @map("model_id")
+  apiTokenId        String?  @map("api_token_id")
+  deptname          String   @default("")
+  totalInputTokens  Int      @default(0) @map("total_input_tokens")
+  totalOutputTokens Int      @default(0) @map("total_output_tokens")
+  requestCount      Int      @default(0) @map("request_count")
+  avgLatencyMs      Int?     @map("avg_latency_ms")
+
+  user  User  @relation(fields: [userId], references: [id])
+  model Model @relation(fields: [modelId], references: [id])
+
+  @@unique([date, userId, modelId, apiTokenId])
+  @@index([date])
+  @@index([userId])
+  @@index([modelId])
+  @@index([apiTokenId])
+  @@map("daily_usage_stats")
+}
+
+// ============================================
+// Request Log (full request/response audit)
+// ============================================
+model RequestLog {
+  id            String   @id @default(uuid())
+  apiTokenId    String?  @map("api_token_id")
+  userId        String?  @map("user_id")
+  modelName     String   @map("model_name")
+  resolvedModel String?  @map("resolved_model")
+  method        String
+  path          String
+  statusCode    Int      @map("status_code")
+  requestBody   String?  @map("request_body") @db.Text
+  responseBody  String?  @map("response_body") @db.Text
+  inputTokens   Int?     @map("input_tokens")
+  outputTokens  Int?     @map("output_tokens")
+  latencyMs     Int?     @map("latency_ms")
+  errorMessage  String?  @map("error_message")
+  userAgent     String?  @map("user_agent")
+  ipAddress     String?  @map("ip_address")
+  stream        Boolean  @default(false)
+  timestamp     DateTime @default(now())
+
+  apiToken      ApiToken? @relation(fields: [apiTokenId], references: [id], onDelete: SetNull)
+
+  @@index([apiTokenId])
+  @@index([userId])
+  @@index([modelName])
+  @@index([statusCode])
+  @@index([timestamp])
+  @@index([userId, timestamp])
+  @@map("request_logs")
+}
+
+// ============================================
+// Rate Limit Config (global defaults)
+// ============================================
+model RateLimitConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  rpmLimit  Int      @map("rpm_limit")
+  tpmLimit  Int      @map("tpm_limit")
+  tphLimit  Int      @map("tph_limit")
+  tpdLimit  Int      @map("tpd_limit")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("rate_limit_configs")
+}
+
+// ============================================
+// Endpoint Health Status (circuit breaker)
+// ============================================
+model EndpointHealth {
+  id              String    @id @default(uuid())
+  endpointUrl     String    @unique @map("endpoint_url")
+  modelId         String?   @map("model_id")
+  isHealthy       Boolean   @default(true) @map("is_healthy")
+  consecutiveFails Int      @default(0) @map("consecutive_fails")
+  lastCheckAt     DateTime? @map("last_check_at")
+  lastErrorAt     DateTime? @map("last_error_at")
+  lastErrorMsg    String?   @map("last_error_msg")
+  cooldownUntil   DateTime? @map("cooldown_until")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([modelId])
+  @@index([isHealthy])
+  @@map("endpoint_health")
+}
+
+// ============================================
+// Audit Log (admin actions)
+// ============================================
+model AuditLog {
+  id         String   @id @default(uuid())
+  adminId    String?  @map("admin_id")
+  loginid    String
+  action     String
+  target     String?
+  targetType String?  @map("target_type")
+  details    Json?
+  ipAddress  String?  @map("ip_address")
+  timestamp  DateTime @default(now())
+
+  @@index([adminId])
+  @@index([loginid])
+  @@index([action])
+  @@index([timestamp])
+  @@index([targetType])
+  @@map("audit_logs")
+}
+
+// ============================================
+// Holiday (for business day DAU calculation)
+// ============================================
+enum HolidayType {
+  NATIONAL
+  COMPANY
+  CUSTOM
+}
+
+model Holiday {
+  id        String      @id @default(uuid())
+  date      DateTime    @db.Date @unique
+  name      String
+  type      HolidayType @default(NATIONAL)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  @@index([date])
+  @@map("holidays")
+}
+
+// ============================================
+// LLM Test Pair (questioner LLM + test LLM)
+// ============================================
+model LLMTestPair {
+  id              String   @id @default(uuid())
+  name            String
+  enabled         Boolean  @default(true)
+  intervalMinutes Int      @default(5) @map("interval_minutes")
+
+  questionerModelName    String  @map("questioner_model_name")
+  questionerEndpoint     String  @map("questioner_endpoint")
+  questionerApiKey       String? @map("questioner_api_key")
+  questionerExtraHeaders Json?   @map("questioner_extra_headers")
+
+  testModelName    String  @map("test_model_name")
+  testEndpoint     String  @map("test_endpoint")
+  testApiKey       String? @map("test_api_key")
+  testExtraHeaders Json?   @map("test_extra_headers")
+
+  questionPrompt   String @default("Generate a short, creative question that tests the AI's knowledge, reasoning, or problem-solving ability. The question should be clear and answerable.") @map("question_prompt")
+  evaluationPrompt String @default("Evaluate the AI response based on: accuracy (is it correct?), helpfulness (does it answer the question?), and clarity (is it well-explained?). Score from 1-100.") @map("evaluation_prompt")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  lastRunAt DateTime? @map("last_run_at")
+
+  results LLMTestResult[]
+
+  @@index([enabled])
+  @@map("llm_test_pairs")
+}
+
+// ============================================
+// LLM Test Result
+// ============================================
+model LLMTestResult {
+  id        String   @id @default(uuid())
+  pairId    String   @map("pair_id")
+  timestamp DateTime @default(now())
+
+  latencyMs    Int      @map("latency_ms")
+  score        Int?
+  status       String   @default("SUCCESS")
+  errorMessage String?  @map("error_message")
+
+  pair LLMTestPair @relation(fields: [pairId], references: [id], onDelete: Cascade)
+
+  @@index([pairId])
+  @@index([timestamp])
+  @@map("llm_test_results")
+}

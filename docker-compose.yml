@@ -1,0 +1,124 @@
+version: '3.8'
+
+# ============================================
+# LLM Gateway - Docker Compose
+# ============================================
+
+x-timezone: &timezone
+  TZ: Asia/Seoul
+
+x-proxy-env: &proxy-env
+  <<: *timezone
+  HTTP_PROXY: "${HTTP_PROXY:-}"
+  HTTPS_PROXY: "${HTTPS_PROXY:-}"
+  NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,postgres,redis,api,dashboard,nginx}"
+  http_proxy: "${HTTP_PROXY:-}"
+  https_proxy: "${HTTPS_PROXY:-}"
+  no_proxy: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,postgres,redis,api,dashboard,nginx}"
+  NODE_TLS_REJECT_UNAUTHORIZED: "${NODE_TLS_REJECT_UNAUTHORIZED:-0}"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: llm-gateway-db
+    restart: unless-stopped
+    environment:
+      <<: *timezone
+      POSTGRES_DB: ${POSTGRES_DB:-llmgateway}
+      POSTGRES_USER: ${POSTGRES_USER:-llmgateway}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-llmgateway123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-7622}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-llmgateway} -d ${POSTGRES_DB:-llmgateway}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: llm-gateway-redis
+    restart: unless-stopped
+    environment:
+      <<: *timezone
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-7623}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./packages/api
+      dockerfile: Dockerfile
+      args:
+        <<: *proxy-env
+    container_name: llm-gateway-api
+    restart: unless-stopped
+    environment:
+      <<: *proxy-env
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-llmgateway}:${POSTGRES_PASSWORD:-llmgateway123}@postgres:5432/${POSTGRES_DB:-llmgateway}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-your-jwt-secret-change-in-production}
+      SSO_CERT_PATH: /app/cert/cert.cer
+      DEVELOPERS: ${DEVELOPERS:-syngha.han}
+      PROXY_PORT: 3000
+      DASHBOARD_PORT: 3001
+      DEFAULT_RPM: ${DEFAULT_RPM:-60}
+      DEFAULT_TPM: ${DEFAULT_TPM:-100000}
+      DEFAULT_TPH: ${DEFAULT_TPH:-1000000}
+      DEFAULT_TPD: ${DEFAULT_TPD:-10000000}
+      REQUEST_LOG_RETENTION_DAYS: ${REQUEST_LOG_RETENTION_DAYS:-30}
+    volumes:
+      - ./cert:/app/cert:ro
+    expose:
+      - "3000"
+      - "3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: ./packages/dashboard
+      dockerfile: Dockerfile
+      args:
+        <<: *proxy-env
+    container_name: llm-gateway-dashboard
+    restart: unless-stopped
+    environment:
+      <<: *proxy-env
+      VITE_API_URL: /api
+    expose:
+      - "80"
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:alpine
+    container_name: llm-gateway-proxy
+    restart: unless-stopped
+    environment:
+      <<: *timezone
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${PROXY_PORT:-7620}:7620"
+      - "${DASHBOARD_PORT:-7621}:7621"
+    depends_on:
+      - api
+      - dashboard
+
+volumes:
+  postgres_data:
+  redis_data:
