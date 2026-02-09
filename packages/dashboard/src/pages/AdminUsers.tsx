@@ -23,26 +23,10 @@ interface User {
   businessUnit?: string;
   firstSeen: string;
   lastActive: string;
-  isActive: boolean;
   isBanned: boolean;
-  tokenCount: number;
-  banReason?: string;
-}
-
-interface UserDetail {
-  user: User;
-  tokens: Array<{
-    id: string;
-    name: string;
-    prefix: string;
-    enabled: boolean;
-    lastUsedAt?: string;
-  }>;
-  usage: Array<{
-    date: string;
-    requests: number;
-    outputTokens: number;
-  }>;
+  bannedReason?: string | null;
+  monthlyOutputTokenBudget?: number | null;
+  _count?: { apiTokens: number; usageLogs: number };
 }
 
 function UserDetailModal({
@@ -58,7 +42,7 @@ function UserDetailModal({
   const [budget, setBudget] = useState('');
   const [showBudgetInput, setShowBudgetInput] = useState(false);
 
-  const { data, isLoading } = useQuery<UserDetail>({
+  const { data, isLoading } = useQuery({
     queryKey: ['admin', 'users', userId],
     queryFn: () => api.admin.users.get(userId),
   });
@@ -95,8 +79,8 @@ function UserDetailModal({
   });
 
   const user = data?.user;
-  const tokens = data?.tokens ?? [];
-  const usage = data?.usage ?? [];
+  const tokens: { id: string; name: string; prefix: string; enabled: boolean; lastUsedAt?: string }[] = data?.user?.apiTokens ?? [];
+  const usage = data?.usageHistory ?? [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -148,16 +132,14 @@ function UserDetailModal({
                 <div className="flex gap-2 mt-1">
                   {user.isBanned ? (
                     <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full font-medium">차단됨</span>
-                  ) : user.isActive ? (
-                    <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">활성</span>
                   ) : (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full font-medium">비활성</span>
+                    <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">활성</span>
                   )}
                 </div>
               </div>
               <div>
                 <p className="text-xs text-gray-500">토큰 수</p>
-                <p className="text-sm">{user.tokenCount}</p>
+                <p className="text-sm">{tokens.length}</p>
               </div>
             </div>
 
@@ -222,11 +204,11 @@ function UserDetailModal({
                     />
                     <button
                       onClick={() => budgetMut.mutate()}
-                      disabled={budgetMut.isPending || !budget}
+                      disabled={budgetMut.isPending}
                       className="px-3 py-2 text-sm bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 flex items-center gap-1"
                     >
                       {budgetMut.isPending && <Loader2 className="w-3 h-3 animate-spin" />}
-                      설정
+                      {budget.trim() ? '설정' : '제한 해제'}
                     </button>
                     <button
                       onClick={() => setShowBudgetInput(false)}
@@ -263,11 +245,11 @@ function UserDetailModal({
                       </tr>
                     </thead>
                     <tbody>
-                      {usage.slice(0, 10).map((u) => (
-                        <tr key={u.date} className="border-b border-gray-50">
-                          <td className="py-2 px-3">{u.date}</td>
-                          <td className="py-2 px-3 text-right">{u.requests.toLocaleString()}</td>
-                          <td className="py-2 px-3 text-right">{u.outputTokens.toLocaleString()}</td>
+                      {usage.slice(0, 10).map((u: { date: string; requestCount?: number; totalOutputTokens?: number }, i: number) => (
+                        <tr key={i} className="border-b border-gray-50">
+                          <td className="py-2 px-3">{new Date(u.date).toLocaleDateString('ko-KR')}</td>
+                          <td className="py-2 px-3 text-right">{(u.requestCount ?? 0).toLocaleString()}</td>
+                          <td className="py-2 px-3 text-right">{(u.totalOutputTokens ?? 0).toLocaleString()}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -333,8 +315,8 @@ export default function AdminUsers() {
   });
 
   const users: User[] = data?.users ?? [];
-  const total: number = data?.total ?? 0;
-  const totalPages = Math.ceil(total / limit);
+  const total: number = data?.pagination?.total ?? 0;
+  const totalPages = data?.pagination?.totalPages ?? Math.ceil(total / limit);
 
   if (error) {
     return (
@@ -415,14 +397,12 @@ export default function AdminUsers() {
                         <div className="flex gap-1">
                           {user.isBanned ? (
                             <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full font-medium">차단</span>
-                          ) : user.isActive ? (
-                            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">활성</span>
                           ) : (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full font-medium">비활성</span>
+                            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">활성</span>
                           )}
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-right text-gray-700">{user.tokenCount}</td>
+                      <td className="py-3 px-4 text-right text-gray-700">{user._count?.apiTokens ?? 0}</td>
                     </tr>
                   ))
                 )}

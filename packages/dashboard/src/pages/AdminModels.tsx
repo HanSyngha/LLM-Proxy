@@ -25,7 +25,7 @@ interface SubModel {
   modelName: string;
   endpointUrl: string;
   apiKey?: string;
-  weight: number;
+  sortOrder: number;
   enabled: boolean;
 }
 
@@ -246,7 +246,7 @@ function SubModelRow({
       <td className="py-2 px-4" />
       <td className="py-2 px-4 text-sm text-gray-600 pl-10">{sub.modelName}</td>
       <td className="py-2 px-4 text-sm text-gray-500 font-mono text-xs">{sub.endpointUrl}</td>
-      <td className="py-2 px-4 text-sm text-gray-600">{sub.weight}</td>
+      <td className="py-2 px-4 text-sm text-gray-600">{sub.sortOrder}</td>
       <td className="py-2 px-4">
         <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
           sub.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
@@ -276,7 +276,7 @@ export default function AdminModels() {
   const [expandedModel, setExpandedModel] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [showAddSubModel, setShowAddSubModel] = useState<string | null>(null);
-  const [subModelForm, setSubModelForm] = useState({ modelName: '', endpointUrl: '', apiKey: '', weight: '1', enabled: true });
+  const [subModelForm, setSubModelForm] = useState({ modelName: '', endpointUrl: '', apiKey: '', enabled: true });
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['admin', 'models'],
@@ -364,13 +364,12 @@ export default function AdminModels() {
         modelName: data.modelName,
         endpointUrl: data.endpointUrl,
         apiKey: data.apiKey || undefined,
-        weight: parseInt(data.weight) || 1,
         enabled: data.enabled,
       }),
     onSuccess: (_, { modelId }) => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'models', 'subModels', modelId] });
       setShowAddSubModel(null);
-      setSubModelForm({ modelName: '', endpointUrl: '', apiKey: '', weight: '1', enabled: true });
+      setSubModelForm({ modelName: '', endpointUrl: '', apiKey: '', enabled: true });
       console.log('서브모델이 추가되었습니다.');
     },
     onError: () => console.log('서브모델 추가에 실패했습니다.'),
@@ -528,14 +527,14 @@ function ModelRow({
   expandedModel: string | null;
   testingId: string | null;
   showAddSubModel: string | null;
-  subModelForm: { modelName: string; endpointUrl: string; apiKey: string; weight: string; enabled: boolean };
+  subModelForm: { modelName: string; endpointUrl: string; apiKey: string; enabled: boolean };
   onToggleExpand: (id: string) => void;
   onEdit: (m: Model) => void;
   onDelete: (id: string) => void;
   onTest: (m: Model) => void;
   onMove: (index: number, direction: 'up' | 'down') => void;
   onShowAddSubModel: (id: string) => void;
-  onSubModelFormChange: (form: { modelName: string; endpointUrl: string; apiKey: string; weight: string; enabled: boolean }) => void;
+  onSubModelFormChange: (form: { modelName: string; endpointUrl: string; apiKey: string; enabled: boolean }) => void;
   onCreateSubModel: (modelId: string) => void;
   createSubModelLoading: boolean;
 }) {
@@ -654,15 +653,6 @@ function ModelRow({
                       value={subModelForm.endpointUrl}
                       onChange={(e) => onSubModelFormChange({ ...subModelForm, endpointUrl: e.target.value })}
                       className="px-2 py-1.5 border rounded text-sm w-60"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">가중치</label>
-                    <input
-                      type="number"
-                      value={subModelForm.weight}
-                      onChange={(e) => onSubModelFormChange({ ...subModelForm, weight: e.target.value })}
-                      className="px-2 py-1.5 border rounded text-sm w-20"
                     />
                   </div>
                   <button

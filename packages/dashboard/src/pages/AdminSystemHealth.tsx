@@ -23,26 +23,36 @@ import {
 } from 'recharts';
 import { api } from '../services/api';
 
-interface Endpoint {
-  id?: string;
+// Backend endpoint response structure:
+// { modelId, name, displayName, endpointUrl, enabled, circuitBreaker: { isHealthy, consecutiveFails, cooldownUntil }, subModels: [...] }
+interface EndpointData {
+  modelId: string;
+  name: string;
+  displayName?: string;
   endpointUrl: string;
-  isHealthy: boolean;
-  consecutiveFails: number;
-  lastCheckAt?: string;
-  lastError?: string;
+  enabled: boolean;
+  circuitBreaker?: {
+    isHealthy: boolean;
+    consecutiveFails: number;
+    cooldownUntil?: string | null;
+  };
 }
 
+// Backend error-rates response: { hourly: [...], daily: [...] }
+// Each item: { modelName, totalRequests, errorRequests, errorRate (0-100) }
 interface ErrorRateModel {
-  name: string;
+  modelName: string;
   errorRate: number;
   totalRequests: number;
-  errorCount: number;
+  errorRequests: number;
 }
 
+// Backend latency response: { data: [...], periodMinutes }
+// Each item: { modelId, modelName, avgLatencyMs, minLatencyMs, maxLatencyMs, p50LatencyMs, p95LatencyMs, requestCount }
 interface LatencyModel {
-  name: string;
-  avgLatency: number;
-  p95Latency: number;
+  modelName: string;
+  avgLatencyMs: number;
+  p95LatencyMs: number;
 }
 
 function StatusCard({
@@ -123,7 +133,7 @@ export default function AdminSystemHealth() {
   });
 
   const checkEndpointMut = useMutation({
-    mutationFn: (id: string) => api.admin.system.checkEndpoint(id),
+    mutationFn: (modelId: string) => api.admin.system.checkEndpoint(modelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'system', 'endpoints'] });
       console.log('엔드포인트 확인 완료');
@@ -140,12 +150,16 @@ export default function AdminSystemHealth() {
     onError: () => console.log('전체 엔드포인트 확인 실패'),
   });
 
-  const endpoints: Endpoint[] = endpointsData?.endpoints ?? [];
-  const errorRates: ErrorRateModel[] = errorRatesData?.models ?? [];
-  const latencies: LatencyModel[] = latencyData?.models ?? [];
+  // Flatten endpoint data for display
+  const endpoints: EndpointData[] = endpointsData?.endpoints ?? [];
+  // Error rates: use hourly data for the chart
+  const errorRates: ErrorRateModel[] = errorRatesData?.hourly ?? [];
+  // Latency: backend returns { data, periodMinutes }
+  const latencies: LatencyModel[] = latencyData?.data ?? [];
 
-  const dbStatus = loadingHealth ? 'loading' : healthData?.database ? 'connected' : 'error';
-  const redisStatus = loadingHealth ? 'loading' : healthData?.redis ? 'connected' : 'error';
+  // DB/Redis status: check the .healthy field inside the objects
+  const dbStatus = loadingHealth ? 'loading' : healthData?.database?.healthy ? 'connected' : 'error';
+  const redisStatus = loadingHealth ? 'loading' : healthData?.redis?.healthy ? 'connected' : 'error';
 
   if (healthError) {
     return (
@@ -181,11 +195,13 @@ export default function AdminSystemHealth() {
           icon={Database}
           label="데이터베이스"
           status={dbStatus as 'connected' | 'error' | 'loading'}
+          details={healthData?.database ? `${healthData.database.latencyMs}ms` : undefined}
         />
         <StatusCard
           icon={Server}
           label="Redis"
           status={redisStatus as 'connected' | 'error' | 'loading'}
+          details={healthData?.redis ? `${healthData.redis.latencyMs}ms` : undefined}
         />
         <StatusCard
           icon={Zap}
@@ -193,11 +209,11 @@ export default function AdminSystemHealth() {
           status={
             loadingEndpoints
               ? 'loading'
-              : endpoints.every((e) => e.isHealthy)
+              : endpoints.every((e) => e.circuitBreaker?.isHealthy !== false)
               ? 'connected'
               : 'error'
           }
-          details={`${endpoints.filter((e) => e.isHealthy).length}/${endpoints.length} 정상`}
+          details={`${endpoints.filter((e) => e.circuitBreaker?.isHealthy !== false).length}/${endpoints.length} 정상`}
         />
       </div>
 
@@ -226,37 +242,33 @@ export default function AdminSystemHealth() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-gray-50">
+                  <th className="text-left py-3 px-4 font-medium text-gray-500">모델</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">엔드포인트 URL</th>
                   <th className="text-center py-3 px-4 font-medium text-gray-500">상태</th>
                   <th className="text-center py-3 px-4 font-medium text-gray-500">연속 실패</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-500">마지막 확인</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-500">마지막 오류</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-500">작업</th>
                 </tr>
               </thead>
               <tbody>
-                {endpoints.map((endpoint, index) => (
-                  <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
+                {endpoints.map((endpoint) => (
+                  <tr key={endpoint.modelId} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-2.5 px-4 text-gray-900 font-medium">{endpoint.displayName || endpoint.name}</td>
                     <td className="py-2.5 px-4 font-mono text-xs text-gray-700 max-w-xs truncate">{endpoint.endpointUrl}</td>
                     <td className="py-2.5 px-4 text-center">
-                      {endpoint.isHealthy ? (
+                      {endpoint.circuitBreaker?.isHealthy !== false ? (
                         <CheckCircle className="w-5 h-5 text-green-500 inline" />
                       ) : (
                         <XCircle className="w-5 h-5 text-red-500 inline" />
                       )}
                     </td>
                     <td className="py-2.5 px-4 text-center">
-                      <span className={`font-medium ${endpoint.consecutiveFails > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                        {endpoint.consecutiveFails}
+                      <span className={`font-medium ${(endpoint.circuitBreaker?.consecutiveFails ?? 0) > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                        {endpoint.circuitBreaker?.consecutiveFails ?? 0}
                       </span>
                     </td>
-                    <td className="py-2.5 px-4 text-xs text-gray-500">
-                      {endpoint.lastCheckAt ? new Date(endpoint.lastCheckAt).toLocaleString('ko-KR') : '-'}
-                    </td>
-                    <td className="py-2.5 px-4 text-xs text-red-500 max-w-xs truncate">{endpoint.lastError || '-'}</td>
                     <td className="py-2.5 px-4 text-right">
                       <button
-                        onClick={() => endpoint.id && checkEndpointMut.mutate(endpoint.id)}
+                        onClick={() => checkEndpointMut.mutate(endpoint.modelId)}
                         disabled={checkEndpointMut.isPending}
                         className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors disabled:opacity-50"
                       >
@@ -277,7 +289,7 @@ export default function AdminSystemHealth() {
         <div className="bg-white rounded-xl shadow-card p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-red-500" />
-            모델별 에러율
+            모델별 에러율 (1시간)
           </h3>
           {loadingErrorRates ? (
             <div className="h-64 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-brand-500" /></div>
@@ -287,14 +299,14 @@ export default function AdminSystemHealth() {
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={errorRates}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                <XAxis dataKey="modelName" tick={{ fontSize: 10 }} />
                 <YAxis
                   tick={{ fontSize: 11 }}
-                  tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
+                  tickFormatter={(v: number) => `${v.toFixed(0)}%`}
                 />
                 <Tooltip
                   formatter={(value: number, name: string) =>
-                    name === 'errorRate' ? `${(value * 100).toFixed(1)}%` : value.toLocaleString()
+                    name === '에러율' ? `${value.toFixed(1)}%` : value.toLocaleString()
                   }
                 />
                 <Legend />
@@ -318,12 +330,12 @@ export default function AdminSystemHealth() {
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={latencies}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                <XAxis dataKey="modelName" tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 11 }} unit="ms" />
                 <Tooltip formatter={(value: number) => `${value.toFixed(0)}ms`} />
                 <Legend />
-                <Bar dataKey="avgLatency" name="평균" fill="#6366F1" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="p95Latency" name="P95" fill="#F59E0B" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="avgLatencyMs" name="평균" fill="#6366F1" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="p95LatencyMs" name="P95" fill="#F59E0B" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}

@@ -19,7 +19,6 @@ interface LogEntry {
   id: string;
   timestamp: string;
   userId?: string;
-  loginid?: string;
   modelName: string;
   statusCode: number;
   latencyMs: number;
@@ -29,6 +28,11 @@ interface LogEntry {
   requestBody?: string;
   responseBody?: string;
   errorMessage?: string;
+  apiToken?: {
+    prefix: string;
+    name: string;
+    user?: { loginid: string; username: string };
+  };
 }
 
 function LogDetailModal({
@@ -90,7 +94,7 @@ function LogDetailModal({
               </div>
               <div>
                 <p className="text-xs text-gray-500">사용자</p>
-                <p className="font-mono">{log.loginid || log.userId || '-'}</p>
+                <p className="font-mono">{log.apiToken?.user?.loginid || log.userId || '-'}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-500">모델</p>
@@ -192,8 +196,8 @@ export default function AdminRequestLogs() {
   });
 
   const logs: LogEntry[] = data?.logs ?? [];
-  const total: number = data?.total ?? 0;
-  const totalPages = Math.ceil(total / limit);
+  const total: number = data?.pagination?.total ?? 0;
+  const totalPages = data?.pagination?.totalPages ?? Math.ceil(total / limit);
 
   if (error) {
     return (
@@ -388,7 +392,7 @@ export default function AdminRequestLogs() {
                           second: '2-digit',
                         })}
                       </td>
-                      <td className="py-2.5 px-4 text-gray-700 font-mono text-xs">{log.loginid || log.userId || '-'}</td>
+                      <td className="py-2.5 px-4 text-gray-700 font-mono text-xs">{log.apiToken?.user?.loginid || log.userId || '-'}</td>
                       <td className="py-2.5 px-4 text-gray-900">{log.modelName}</td>
                       <td className="py-2.5 px-4 text-center">
                         <span className={`inline-flex px-2 py-0.5 rounded text-xs font-bold ${

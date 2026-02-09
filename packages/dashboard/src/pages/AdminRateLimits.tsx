@@ -21,7 +21,7 @@ interface TokenOverride {
   id: string;
   name: string;
   prefix: string;
-  ownerLoginId?: string;
+  user?: { id: string; loginid: string; username: string };
   rpmLimit?: number;
   tpmLimit?: number;
   tphLimit?: number;
@@ -222,7 +222,7 @@ export default function AdminRateLimits() {
                       <p className="font-medium text-gray-900">{token.name}</p>
                       <p className="text-xs text-gray-400 font-mono">{token.prefix}</p>
                     </td>
-                    <td className="py-2.5 px-4 text-gray-600">{token.ownerLoginId || '-'}</td>
+                    <td className="py-2.5 px-4 text-gray-600">{token.user?.loginid || '-'}</td>
                     <td className="py-2.5 px-4 text-right">
                       {token.rpmLimit ? (
                         <span className="px-2 py-0.5 bg-brand-50 text-brand-700 rounded text-xs font-medium">

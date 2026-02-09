@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Search,
@@ -22,18 +22,21 @@ interface Token {
   name: string;
   prefix: string;
   userId: string;
-  ownerName?: string;
-  ownerLoginId?: string;
+  user?: {
+    id: string;
+    loginid: string;
+    username: string;
+    deptname?: string;
+  };
   enabled: boolean;
   expiresAt?: string;
   lastUsedAt?: string;
-  totalRequests?: number;
-  totalOutputTokens?: number;
-  rpmLimit?: number;
-  tpmLimit?: number;
-  tphLimit?: number;
-  tpdLimit?: number;
-  monthlyBudget?: number;
+  createdAt?: string;
+  rpmLimit?: number | null;
+  tpmLimit?: number | null;
+  tphLimit?: number | null;
+  tpdLimit?: number | null;
+  monthlyOutputTokenBudget?: number | null;
   allowedModels?: string[];
 }
 
@@ -54,10 +57,21 @@ function TokenDetailModal({
   const [tpdLimit, setTpdLimit] = useState(token.tpdLimit?.toString() ?? '');
 
   // Budget form
-  const [budget, setBudget] = useState(token.monthlyBudget?.toString() ?? '');
+  const [budget, setBudget] = useState(token.monthlyOutputTokenBudget?.toString() ?? '');
 
   // Models form
   const [selectedModels, setSelectedModels] = useState<string[]>(token.allowedModels ?? []);
+
+  // Reset form state when token changes
+  useEffect(() => {
+    setRpmLimit(token.rpmLimit?.toString() ?? '');
+    setTpmLimit(token.tpmLimit?.toString() ?? '');
+    setTphLimit(token.tphLimit?.toString() ?? '');
+    setTpdLimit(token.tpdLimit?.toString() ?? '');
+    setBudget(token.monthlyOutputTokenBudget?.toString() ?? '');
+    setSelectedModels(token.allowedModels ?? []);
+    setActiveTab('limits');
+  }, [token.id]);
 
   const { data: modelsData } = useQuery({
     queryKey: ['admin', 'models'],
@@ -67,10 +81,10 @@ function TokenDetailModal({
   const rateLimitsMut = useMutation({
     mutationFn: () =>
       api.admin.tokens.setRateLimits(token.id, {
-        rpmLimit: rpmLimit ? parseInt(rpmLimit) : undefined,
-        tpmLimit: tpmLimit ? parseInt(tpmLimit) : undefined,
-        tphLimit: tphLimit ? parseInt(tphLimit) : undefined,
-        tpdLimit: tpdLimit ? parseInt(tpdLimit) : undefined,
+        rpmLimit: rpmLimit.trim() ? parseInt(rpmLimit) : null,
+        tpmLimit: tpmLimit.trim() ? parseInt(tpmLimit) : null,
+        tphLimit: tphLimit.trim() ? parseInt(tphLimit) : null,
+        tpdLimit: tpdLimit.trim() ? parseInt(tpdLimit) : null,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'tokens'] });
@@ -121,7 +135,7 @@ function TokenDetailModal({
             </div>
             <div>
               <p className="text-xs text-gray-500">소유자</p>
-              <p>{token.ownerName || token.ownerLoginId || token.userId}</p>
+              <p>{token.user?.username || token.user?.loginid || token.userId}</p>
             </div>
             <div>
               <p className="text-xs text-gray-500">상태</p>
@@ -248,12 +262,12 @@ function TokenDetailModal({
                   <label key={model.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={selectedModels.includes(model.name)}
+                      checked={selectedModels.includes(model.id)}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedModels([...selectedModels, model.name]);
+                          setSelectedModels([...selectedModels, model.id]);
                         } else {
-                          setSelectedModels(selectedModels.filter((m) => m !== model.name));
+                          setSelectedModels(selectedModels.filter((m) => m !== model.id));
                         }
                       }}
                       className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
@@ -318,8 +332,8 @@ export default function AdminTokens() {
   });
 
   const tokens: Token[] = data?.tokens ?? [];
-  const total: number = data?.total ?? 0;
-  const totalPages = Math.ceil(total / limit);
+  const total: number = data?.pagination?.total ?? 0;
+  const totalPages = data?.pagination?.totalPages ?? Math.ceil(total / limit);
 
   if (error) {
     return (
@@ -387,15 +401,13 @@ export default function AdminTokens() {
                   <th className="text-left py-3 px-4 font-medium text-gray-500">상태</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">만료일</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">마지막 사용</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500">요청 수</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500">출력 토큰</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-500">작업</th>
                 </tr>
               </thead>
               <tbody>
                 {tokens.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 text-center text-gray-400">
+                    <td colSpan={7} className="py-12 text-center text-gray-400">
                       토큰이 없습니다.
                     </td>
                   </tr>
@@ -412,7 +424,7 @@ export default function AdminTokens() {
                         {token.name}
                       </td>
                       <td className="py-3 px-4 font-mono text-xs text-gray-500">{token.prefix}</td>
-                      <td className="py-3 px-4 text-gray-600">{token.ownerName || token.ownerLoginId || '-'}</td>
+                      <td className="py-3 px-4 text-gray-600">{token.user?.username || token.user?.loginid || '-'}</td>
                       <td className="py-3 px-4">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                           token.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
@@ -426,8 +438,6 @@ export default function AdminTokens() {
                       <td className="py-3 px-4 text-gray-500 text-xs">
                         {token.lastUsedAt ? new Date(token.lastUsedAt).toLocaleDateString('ko-KR') : '-'}
                       </td>
-                      <td className="py-3 px-4 text-right text-gray-600">{(token.totalRequests ?? 0).toLocaleString()}</td>
-                      <td className="py-3 px-4 text-right text-gray-600">{(token.totalOutputTokens ?? 0).toLocaleString()}</td>
                       <td className="py-3 px-4">
                         <div className="flex items-center justify-end gap-1">
                           <button

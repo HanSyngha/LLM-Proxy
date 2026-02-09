@@ -412,7 +412,7 @@ async function handleStreamingRequest(
           response = await fetch(url, {
             method: 'POST',
             headers,
-            body: JSON.stringify({ ...bodyWithoutMaxTokens, stream: true }),
+            body: JSON.stringify({ ...bodyWithoutMaxTokens, stream: true, stream_options: { include_usage: true } }),
             signal: controller.signal,
           });
         } else {
@@ -510,7 +510,9 @@ async function handleStreamingRequest(
 
     const reader = response.body?.getReader();
     if (!reader) {
-      res.status(500).json({ error: { type: 'server_error', message: 'Failed to get response stream' } });
+      // SSE headers already sent, cannot use res.status() — write error as SSE event
+      res.write(`data: ${JSON.stringify({ error: { type: 'server_error', message: 'Failed to get response stream' } })}\n\n`);
+      res.end();
       return { handled: true, statusCode: 500, errorMessage: 'Failed to get response stream' };
     }
 

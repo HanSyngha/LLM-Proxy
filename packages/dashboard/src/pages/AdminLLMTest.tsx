@@ -378,7 +378,7 @@ function PairResultCharts({ pairId }: { pairId: string }) {
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="time" tick={{ fontSize: 9 }} />
-            <YAxis tick={{ fontSize: 11 }} domain={[0, 10]} />
+            <YAxis tick={{ fontSize: 11 }} domain={[0, 'auto']} />
             <Tooltip />
             <Line type="monotone" dataKey="score" name="점수" stroke="#6366F1" strokeWidth={2} dot={{ r: 2 }} />
           </LineChart>

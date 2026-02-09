@@ -37,20 +37,15 @@ function formatNumber(n: number): string {
 }
 
 function getDateRange(preset: Preset, customStart: string, customEnd: string) {
-  const end = new Date();
-  let start = new Date();
-
-  if (preset === 'custom') {
-    return { startDate: customStart, endDate: customEnd };
+  if (preset === 'custom' && customStart && customEnd) {
+    const start = new Date(customStart);
+    const end = new Date(customEnd);
+    const diffDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+    return { days: diffDays };
   }
 
   const days = preset === '7d' ? 7 : preset === '30d' ? 30 : 90;
-  start.setDate(end.getDate() - days);
-
-  return {
-    startDate: start.toISOString().split('T')[0],
-    endDate: end.toISOString().split('T')[0],
-  };
+  return { days };
 }
 
 function exportToCsv(data: Record<string, unknown>[], filename: string) {
@@ -121,26 +116,48 @@ export default function AdminUsage() {
     enabled: activeTab === 'overview',
   });
 
+  // Preprocess nested data for charts/tables
+  const userChartData = (userData?.data ?? []).map((u: { user?: { loginid?: string; username?: string }; requests: number; outputTokens: number; inputTokens: number }) => ({
+    ...u,
+    loginid: u.user?.loginid || 'Unknown',
+    username: u.user?.username || 'Unknown',
+  }));
+
+  const modelChartData = (modelData?.data ?? []).map((m: { model?: { displayName?: string; name?: string }; requests: number; outputTokens: number; inputTokens: number }) => ({
+    ...m,
+    modelName: m.model?.displayName || m.model?.name || 'Unknown',
+  }));
+
+  const tokenChartData = (tokenData?.data ?? []).map((t: { token?: { name?: string; prefix?: string; user?: { loginid?: string } }; requests: number; outputTokens: number; inputTokens: number }) => ({
+    ...t,
+    tokenName: t.token?.name || t.token?.prefix || 'N/A',
+    loginid: t.token?.user?.loginid || '-',
+  }));
+
   const handleExport = () => {
     let exportData: Record<string, unknown>[] = [];
     let filename = 'usage';
 
     switch (activeTab) {
       case 'overview':
-        exportData = dailyData?.stats ?? [];
+        exportData = dailyData?.data ?? [];
         filename = 'daily_usage';
         break;
       case 'user':
-        exportData = userData?.users ?? [];
+        exportData = userChartData;
         filename = 'user_usage';
         break;
       case 'model':
-        exportData = modelData?.models ?? [];
+        exportData = modelChartData;
         filename = 'model_usage';
         break;
       case 'department':
-        exportData = deptData?.departments ?? [];
+        exportData = deptData?.data ?? [];
         filename = 'department_usage';
+        break;
+      case 'token':
+        exportData = tokenChartData;
+        filename = 'token_usage';
         break;
     }
 
@@ -245,7 +262,7 @@ export default function AdminUsage() {
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={dailyData?.stats ?? []}>
+                <AreaChart data={dailyData?.data ?? []}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v: string) => v.slice(5)} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
@@ -266,7 +283,7 @@ export default function AdminUsage() {
                 <div className="h-64 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-brand-500" /></div>
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={dauData?.stats ?? []}>
+                  <LineChart data={dauData?.data ?? []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v: string) => v.slice(5)} />
                     <YAxis tick={{ fontSize: 11 }} />
@@ -283,13 +300,13 @@ export default function AdminUsage() {
                 <div className="h-64 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-brand-500" /></div>
               ) : (
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={modelData?.models ?? []}>
+                  <BarChart data={modelChartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="modelName" tick={{ fontSize: 10 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
                     <Tooltip formatter={(value: number) => formatNumber(value)} />
                     <Bar dataKey="outputTokens" name="출력 토큰" radius={[4, 4, 0, 0]}>
-                      {(modelData?.models ?? []).map((_: unknown, i: number) => (
+                      {modelChartData.map((_: unknown, i: number) => (
                         <Cell key={i} fill={COLORS[i % COLORS.length]} />
                       ))}
                     </Bar>
@@ -309,7 +326,7 @@ export default function AdminUsage() {
               <div className="h-72 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-brand-500" /></div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={(userData?.users ?? []).slice(0, 20)} layout="vertical">
+                <BarChart data={userChartData.slice(0, 20)} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
                   <YAxis type="category" dataKey="loginid" tick={{ fontSize: 10 }} width={100} />
@@ -335,7 +352,7 @@ export default function AdminUsage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(userData?.users ?? []).map((u: { loginid: string; username: string; requests: number; outputTokens: number }) => (
+                  {userChartData.map((u: { loginid: string; username: string; requests: number; outputTokens: number }) => (
                     <tr key={u.loginid} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-2.5 px-4 font-mono text-gray-700">{u.loginid}</td>
                       <td className="py-2.5 px-4 text-gray-900">{u.username}</td>
@@ -358,7 +375,7 @@ export default function AdminUsage() {
               <div className="h-72 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-brand-500" /></div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={modelData?.models ?? []}>
+                <BarChart data={modelChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="modelName" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
@@ -382,7 +399,7 @@ export default function AdminUsage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(modelData?.models ?? []).map((m: { modelName: string; requests: number; outputTokens: number }) => (
+                  {modelChartData.map((m: { modelName: string; requests: number; outputTokens: number }) => (
                     <tr key={m.modelName} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-2.5 px-4 font-medium text-gray-900">{m.modelName}</td>
                       <td className="py-2.5 px-4 text-right">{m.requests.toLocaleString()}</td>
@@ -404,7 +421,7 @@ export default function AdminUsage() {
               <div className="h-72 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-brand-500" /></div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={deptData?.departments ?? []} layout="vertical">
+                <BarChart data={deptData?.data ?? []} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
                   <YAxis type="category" dataKey="deptname" tick={{ fontSize: 10 }} width={120} />
@@ -428,7 +445,7 @@ export default function AdminUsage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(deptData?.departments ?? []).map((d: { deptname: string; requests: number; outputTokens: number }) => (
+                  {(deptData?.data ?? []).map((d: { deptname: string; requests: number; outputTokens: number }) => (
                     <tr key={d.deptname} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-2.5 px-4 font-medium text-gray-900">{d.deptname}</td>
                       <td className="py-2.5 px-4 text-right">{d.requests.toLocaleString()}</td>
@@ -460,7 +477,7 @@ export default function AdminUsage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(tokenData?.tokens ?? []).map((t: { tokenName: string; loginid?: string; requests: number; outputTokens: number }, i: number) => (
+                    {tokenChartData.map((t: { tokenName: string; loginid: string; requests: number; outputTokens: number }, i: number) => (
                       <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
                         <td className="py-2.5 px-4 font-medium text-gray-900">{t.tokenName || 'N/A'}</td>
                         <td className="py-2.5 px-4 text-gray-600">{t.loginid || '-'}</td>

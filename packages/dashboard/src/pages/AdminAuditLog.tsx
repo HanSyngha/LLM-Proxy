@@ -78,8 +78,8 @@ export default function AdminAuditLog() {
   });
 
   const logs: AuditEntry[] = data?.logs ?? [];
-  const total: number = data?.total ?? 0;
-  const totalPages = Math.ceil(total / limit);
+  const total: number = data?.pagination?.total ?? 0;
+  const totalPages = data?.pagination?.totalPages ?? Math.ceil(total / limit);
 
   if (error) {
     return (

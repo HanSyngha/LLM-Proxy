@@ -57,6 +57,13 @@ proxyApp.get('/health', async (_req, res) => {
 
 proxyApp.use('/v1', proxyRoutes);
 
+proxyApp.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Proxy error:', err);
+  res.status(500).json({
+    error: { type: 'server_error', message: 'Internal server error' },
+  });
+});
+
 proxyApp.use((_req, res) => {
   res.status(404).json({ error: 'Not found. Use /v1/ endpoints.' });
 });

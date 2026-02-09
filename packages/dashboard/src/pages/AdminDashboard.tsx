@@ -5,7 +5,6 @@ import {
   Activity,
   Zap,
   AlertTriangle,
-  Clock,
   TrendingUp,
   RefreshCw,
 } from 'lucide-react';
@@ -62,7 +61,7 @@ function LoadingSkeleton() {
   return (
     <div className="animate-pulse space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {Array.from({ length: 7 }).map((_, i) => (
+        {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="bg-white rounded-xl shadow-card p-5 h-24">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-gray-200 rounded-lg" />
@@ -101,7 +100,7 @@ export default function AdminDashboard() {
 
   const { data: topUsers, isLoading: loadingUsers } = useQuery({
     queryKey: ['admin', 'stats', 'byUser'],
-    queryFn: () => api.admin.stats.byUser({ limit: 10, sort: 'outputTokens' }),
+    queryFn: () => api.admin.stats.byUser({ days: 30 }),
     refetchInterval: 30_000,
   });
 
@@ -147,6 +146,22 @@ export default function AdminDashboard() {
 
   const stats = overview;
 
+  // Prepare model chart data with flat modelName field
+  const modelChartData = (modelData?.data ?? []).map((m: { model?: { displayName?: string; name?: string }; outputTokens: number; requests: number }) => ({
+    ...m,
+    modelName: m.model?.displayName || m.model?.name || 'Unknown',
+  }));
+
+  // Prepare dept chart data
+  const deptChartData = deptData?.data ?? [];
+
+  // Prepare top users data with flat loginid/username
+  const topUsersData = (topUsers?.data ?? []).map((u: { user?: { loginid?: string; username?: string }; requests: number; outputTokens: number }) => ({
+    ...u,
+    loginid: u.user?.loginid || 'Unknown',
+    username: u.user?.username || 'Unknown',
+  }));
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -162,14 +177,13 @@ export default function AdminDashboard() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard icon={Users} label="전체 사용자" value={formatNumber(stats?.totalUsers ?? 0)} color="bg-blue-500" />
-        <StatCard icon={Users} label="활성 사용자" value={formatNumber(stats?.activeUsers ?? 0)} color="bg-green-500" />
-        <StatCard icon={Key} label="전체 토큰" value={formatNumber(stats?.totalTokens ?? 0)} color="bg-purple-500" />
+        <StatCard icon={Users} label="활성 사용자 (5분)" value={formatNumber(stats?.activeUsersLast5Min ?? 0)} color="bg-green-500" />
+        <StatCard icon={Key} label="활성 토큰" value={formatNumber(stats?.activeTokens ?? 0)} color="bg-purple-500" />
         <StatCard icon={Activity} label="오늘 요청 수" value={formatNumber(stats?.todayRequests ?? 0)} color="bg-brand-500" />
         <StatCard icon={Zap} label="오늘 출력 토큰" value={formatNumber(stats?.todayOutputTokens ?? 0)} color="bg-amber-500" />
-        <StatCard icon={AlertTriangle} label="에러율" value={`${((stats?.errorRate ?? 0) * 100).toFixed(1)}%`} color="bg-red-500" />
-        <StatCard icon={Clock} label="평균 응답시간" value={`${(stats?.avgLatency ?? 0).toFixed(0)}ms`} color="bg-teal-500" />
+        <StatCard icon={AlertTriangle} label="에러율" value={`${(stats?.errorRate ?? 0).toFixed(1)}%`} color="bg-red-500" />
       </div>
 
       {/* Charts Row 1 */}
@@ -181,7 +195,7 @@ export default function AdminDashboard() {
             <div className="h-64 bg-gray-50 rounded animate-pulse" />
           ) : (
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={dailyData?.stats ?? []}>
+              <BarChart data={dailyData?.data ?? []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis
                   dataKey="date"
@@ -208,7 +222,7 @@ export default function AdminDashboard() {
             <div className="h-64 bg-gray-50 rounded animate-pulse" />
           ) : (
             <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={dauData?.stats ?? []}>
+              <LineChart data={dauData?.data ?? []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis
                   dataKey="date"
@@ -243,7 +257,7 @@ export default function AdminDashboard() {
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
-                  data={modelData?.models ?? []}
+                  data={modelChartData}
                   dataKey="outputTokens"
                   nameKey="modelName"
                   cx="50%"
@@ -254,7 +268,7 @@ export default function AdminDashboard() {
                   }
                   labelLine={{ strokeWidth: 1 }}
                 >
-                  {(modelData?.models ?? []).map((_: unknown, index: number) => (
+                  {modelChartData.map((_: unknown, index: number) => (
                     <Cell key={index} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
@@ -271,7 +285,7 @@ export default function AdminDashboard() {
             <div className="h-64 bg-gray-50 rounded animate-pulse" />
           ) : (
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={deptData?.departments ?? []} layout="vertical">
+              <BarChart data={deptChartData} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
                 <YAxis
@@ -315,7 +329,7 @@ export default function AdminDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {(topUsers?.users ?? []).map((user: { loginid: string; username: string; requests: number; outputTokens: number }, index: number) => (
+                {topUsersData.map((user: { loginid: string; username: string; requests: number; outputTokens: number }, index: number) => (
                   <tr key={user.loginid} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     <td className="py-3 px-4">
                       <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold ${

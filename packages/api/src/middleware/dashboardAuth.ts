@@ -55,14 +55,9 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
       }
     }
 
-    const decoded = decodeJWT(token);
-    if (!decoded || !decoded.loginid) {
-      res.status(403).json({ error: 'Invalid token' });
-      return;
-    }
-
-    req.user = decoded;
-    next();
+    // No valid token found - reject
+    res.status(403).json({ error: 'Invalid token' });
+    return;
   } catch {
     res.status(403).json({ error: 'Invalid token' });
   }

@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { prisma } from '../index.js';
 import { hashApiToken, extractPrefix } from '../services/tokenHash.service.js';
 
@@ -64,9 +65,11 @@ export async function authenticateApiToken(
       return;
     }
 
-    // Verify full hash
+    // Verify full hash (timing-safe comparison)
     const hashedKey = hashApiToken(rawKey);
-    if (hashedKey !== token.hashedKey) {
+    const a = Buffer.from(hashedKey, 'hex');
+    const b = Buffer.from(token.hashedKey, 'hex');
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
       res.status(401).json({
         error: { type: 'authentication_error', message: 'Invalid API key' },
       });
