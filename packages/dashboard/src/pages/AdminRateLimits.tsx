@@ -192,10 +192,10 @@ function DeptLimitsTab() {
     return {
       deptname: form.deptname,
       monthlyOutputTokenBudget: form.budgetUnlimited ? 999_999_999_999 : form.monthlyOutputTokenBudget,
-      rpmLimit: form.rpmUnlimited ? null : (form.rpmLimit === '' ? null : Number(form.rpmLimit)),
-      tpmLimit: form.tpmUnlimited ? null : (form.tpmLimit === '' ? null : Number(form.tpmLimit)),
-      tphLimit: form.tphUnlimited ? null : (form.tphLimit === '' ? null : Number(form.tphLimit)),
-      tpdLimit: form.tpdUnlimited ? null : (form.tpdLimit === '' ? null : Number(form.tpdLimit)),
+      rpmLimit: form.rpmUnlimited ? 0 : (form.rpmLimit === '' ? null : Number(form.rpmLimit)),
+      tpmLimit: form.tpmUnlimited ? 0 : (form.tpmLimit === '' ? null : Number(form.tpmLimit)),
+      tphLimit: form.tphUnlimited ? 0 : (form.tphLimit === '' ? null : Number(form.tphLimit)),
+      tpdLimit: form.tpdUnlimited ? 0 : (form.tpdLimit === '' ? null : Number(form.tpdLimit)),
     };
   }
 
@@ -229,10 +229,10 @@ function DeptLimitsTab() {
       deptname: item.deptname,
       monthlyOutputTokenBudget: isUnlimited ? 10_000_000 : item.monthlyOutputTokenBudget,
       budgetUnlimited: isUnlimited,
-      rpmLimit: item.rpmLimit ?? 60, rpmUnlimited: item.rpmLimit === null,
-      tpmLimit: item.tpmLimit ?? 100000, tpmUnlimited: item.tpmLimit === null,
-      tphLimit: item.tphLimit ?? 1000000, tphUnlimited: item.tphLimit === null,
-      tpdLimit: item.tpdLimit ?? 10000000, tpdUnlimited: item.tpdLimit === null,
+      rpmLimit: item.rpmLimit || 60, rpmUnlimited: item.rpmLimit === null || item.rpmLimit === 0,
+      tpmLimit: item.tpmLimit || 100000, tpmUnlimited: item.tpmLimit === null || item.tpmLimit === 0,
+      tphLimit: item.tphLimit || 1000000, tphUnlimited: item.tphLimit === null || item.tphLimit === 0,
+      tpdLimit: item.tpdLimit || 10000000, tpdUnlimited: item.tpdLimit === null || item.tpdLimit === 0,
     });
   }
 
@@ -610,7 +610,7 @@ function TokenLimitsTab() {
   });
 
   const tokensWithOverrides: TokenOverride[] = (data?.tokens ?? []).filter(
-    (t: TokenOverride) => t.rpmLimit != null || t.tpmLimit != null || t.tphLimit != null || t.tpdLimit != null
+    (t: TokenOverride) => (t.rpmLimit != null && t.rpmLimit !== 0) || (t.tpmLimit != null && t.tpmLimit !== 0) || (t.tphLimit != null && t.tphLimit !== 0) || (t.tpdLimit != null && t.tpdLimit !== 0)
   );
 
   return (
