@@ -71,6 +71,7 @@ function UserDetailModal({
       setShowBanInput(false);
       setBanReason('');
     },
+    onError: () => alert('사용자 차단에 실패했습니다.'),
   });
 
   const unbanMut = useMutation({
@@ -78,6 +79,7 @@ function UserDetailModal({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
     },
+    onError: () => alert('차단 해제에 실패했습니다.'),
   });
 
   const budgetMut = useMutation({
@@ -87,6 +89,7 @@ function UserDetailModal({
       setShowBudgetInput(false);
       setBudget('');
     },
+    onError: () => alert('월간 토큰 제한 설정에 실패했습니다.'),
   });
 
   const setRoleMut = useMutation({
@@ -95,6 +98,7 @@ function UserDetailModal({
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
       setShowRoleInput(false);
     },
+    onError: () => alert('관리자 역할 변경에 실패했습니다.'),
   });
 
   const user = data?.user;

@@ -7,7 +7,7 @@
  * - 모델별 사용량 분석
  * - 토큰별 사용량 분석
  * - 최근 요청 목록
- * - 예산 잔여량
+ * - 월간 토큰 제한 잔여량
  */
 
 import { Router } from 'express';
@@ -22,7 +22,7 @@ myUsageRoutes.use(authenticateToken);
 
 /**
  * GET /my-usage/summary
- * 내 사용량 요약 (오늘, 이번 주, 이번 달) + 예산 정보
+ * 내 사용량 요약 (오늘, 이번 주, 이번 달) + 월간 토큰 제한 정보
  */
 myUsageRoutes.get('/summary', async (req: AuthenticatedRequest, res) => {
   try {
@@ -88,7 +88,7 @@ myUsageRoutes.get('/summary', async (req: AuthenticatedRequest, res) => {
       _count: true,
     });
 
-    // 예산 정보
+    // 월간 토큰 제한 정보
     const monthlyBudget = user.monthlyOutputTokenBudget;
     const monthlyUsed = await getMonthlyOutputTokens(redis, 'user', user.id);
 
@@ -401,7 +401,7 @@ myUsageRoutes.get('/recent', async (req: AuthenticatedRequest, res) => {
 
 /**
  * GET /my-usage/budget
- * 내 예산 잔여량 (사용자 + 토큰별)
+ * 내 월간 토큰 제한 잔여량 (사용자 + 토큰별)
  */
 myUsageRoutes.get('/budget', async (req: AuthenticatedRequest, res) => {
   try {
@@ -419,11 +419,11 @@ myUsageRoutes.get('/budget', async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    // User-level budget
+    // User-level monthly limit
     const userMonthlyBudget = user.monthlyOutputTokenBudget;
     const userMonthlyUsed = await getMonthlyOutputTokens(redis, 'user', user.id);
 
-    // Per-token budgets
+    // Per-token monthly limits
     const tokens = await prisma.apiToken.findMany({
       where: { userId: user.id },
       select: {
@@ -435,7 +435,7 @@ myUsageRoutes.get('/budget', async (req: AuthenticatedRequest, res) => {
       },
     });
 
-    const tokenBudgets = await Promise.all(
+    const tokenLimits = await Promise.all(
       tokens.map(async (token) => {
         const used = await getMonthlyOutputTokens(redis, 'token', token.id);
         return {
@@ -460,10 +460,10 @@ myUsageRoutes.get('/budget', async (req: AuthenticatedRequest, res) => {
           ? Math.max(0, userMonthlyBudget - userMonthlyUsed)
           : null,
       },
-      tokens: tokenBudgets,
+      tokens: tokenLimits,
     });
   } catch (error) {
-    console.error('Get my budget error:', error);
-    res.status(500).json({ error: 'Failed to get budget info' });
+    console.error('Get my usage limit error:', error);
+    res.status(500).json({ error: 'Failed to get usage limit info' });
   }
 });
