@@ -22,6 +22,7 @@ services:
     image: postgres:15-alpine
     container_name: llm-gateway-db
     restart: unless-stopped
+    command: postgres -c max_connections=200 -c shared_buffers=256MB -c work_mem=8MB
     environment:
       <<: *timezone
       POSTGRES_DB: ${POSTGRES_DB:-llmgateway}
@@ -43,7 +44,7 @@ services:
     restart: unless-stopped
     environment:
       <<: *timezone
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxclients 10000
     volumes:
       - redis_data:/data
     ports:
@@ -65,7 +66,7 @@ services:
     environment:
       <<: *proxy-env
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-llmgateway}:${POSTGRES_PASSWORD:-llmgateway123}@postgres:5432/${POSTGRES_DB:-llmgateway}?connection_limit=20&pool_timeout=30
+      DATABASE_URL: postgresql://${POSTGRES_USER:-llmgateway}:${POSTGRES_PASSWORD:-llmgateway123}@postgres:5432/${POSTGRES_DB:-llmgateway}?connection_limit=100&pool_timeout=30
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-your-jwt-secret-change-in-production}
       SSO_CERT_PATH: /app/cert/cert.cer
