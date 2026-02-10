@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Users,
@@ -16,6 +17,8 @@ import {
   Bar,
   LineChart,
   Line,
+  AreaChart,
+  Area,
   PieChart,
   Pie,
   Cell,
@@ -182,8 +185,30 @@ export default function AdminDashboard() {
     modelName: m.model?.displayName || m.model?.name || 'Unknown',
   }));
 
+  // Cumulative daily data
+  const cumulativeDailyData = useMemo(() => {
+    const data = dailyData?.data ?? [];
+    let cumInput = 0, cumOutput = 0;
+    return data.map((d: { date: string; inputTokens: number; outputTokens: number }) => {
+      cumInput += d.inputTokens;
+      cumOutput += d.outputTokens;
+      return { date: d.date, cumInputTokens: cumInput, cumOutputTokens: cumOutput };
+    });
+  }, [dailyData]);
+
   // Prepare dept chart data
   const deptChartData = deptData?.data ?? [];
+
+  // Cumulative dept data (Pareto: stacked bar + cumulative %)
+  const cumulativeDeptData = useMemo(() => {
+    const data = deptChartData as Array<{ deptname: string; inputTokens: number; outputTokens: number }>;
+    let cumTotal = 0;
+    const totalAll = data.reduce((sum, d) => sum + d.inputTokens + d.outputTokens, 0);
+    return data.map(d => {
+      cumTotal += d.inputTokens + d.outputTokens;
+      return { ...d, cumulativePct: totalAll > 0 ? Math.round(cumTotal / totalAll * 100) : 0 };
+    });
+  }, [deptChartData]);
 
   // Prepare top users data with flat loginid/username
   const topUsersData = (topUsers?.data ?? []).map((u: { user?: { loginid?: string; username?: string }; requests: number; inputTokens: number; outputTokens: number }) => ({
@@ -233,31 +258,29 @@ export default function AdminDashboard() {
 
       {/* Charts Row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Daily Usage Trend - Stacked bar (input/output tokens) + line (requests) */}
+        {/* Daily Usage Trend - Cumulative stacked area */}
         <div className="bg-white rounded-xl shadow-card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">일별 사용량 추이 (30일)</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">일별 사용량 추이 (누적, 30일)</h3>
           {loadingDaily ? (
             <div className="h-64 bg-gray-50 rounded animate-pulse" />
           ) : (
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={dailyData?.data ?? []}>
+              <AreaChart data={cumulativeDailyData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis
                   dataKey="date"
                   tick={{ fontSize: 11 }}
                   tickFormatter={(v: string) => v.slice(5)}
                 />
-                <YAxis yAxisId="tokens" tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
-                <YAxis yAxisId="requests" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
                 <Tooltip
                   formatter={(value: number, name: string) => [formatNumber(value), name]}
                   labelFormatter={(label: string) => `날짜: ${label}`}
                 />
                 <Legend />
-                <Bar yAxisId="tokens" dataKey="inputTokens" name="입력 토큰" fill="#06B6D4" stackId="tokens" radius={[0, 0, 0, 0]} />
-                <Bar yAxisId="tokens" dataKey="outputTokens" name="출력 토큰" fill="#8B5CF6" stackId="tokens" radius={[2, 2, 0, 0]} />
-                <Line yAxisId="requests" type="monotone" dataKey="requests" name="요청 수" stroke="#F59E0B" strokeWidth={2} dot={false} />
-              </BarChart>
+                <Area type="monotone" dataKey="cumInputTokens" name="입력 토큰 (누적)" stroke="#06B6D4" fill="#06B6D4" fillOpacity={0.2} stackId="tokens" />
+                <Area type="monotone" dataKey="cumOutputTokens" name="출력 토큰 (누적)" stroke="#8B5CF6" fill="#8B5CF6" fillOpacity={0.2} stackId="tokens" />
+              </AreaChart>
             </ResponsiveContainer>
           )}
         </div>
@@ -325,26 +348,25 @@ export default function AdminDashboard() {
           )}
         </div>
 
-        {/* Department Usage */}
+        {/* Department Usage - Cumulative (Pareto) */}
         <div className="bg-white rounded-xl shadow-card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">부서별 사용량</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">부서별 사용량 (누적)</h3>
           {loadingDepts ? (
             <div className="h-64 bg-gray-50 rounded animate-pulse" />
           ) : (
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={deptChartData} layout="vertical">
+              <BarChart data={cumulativeDeptData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
-                <YAxis
-                  type="category"
-                  dataKey="deptname"
-                  tick={{ fontSize: 11 }}
-                  width={100}
+                <XAxis dataKey="deptname" tick={{ fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={50} />
+                <YAxis yAxisId="tokens" tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
+                <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v}%`} domain={[0, 100]} />
+                <Tooltip
+                  formatter={(value: number, name: string) => [name === '누적 비율' ? `${value}%` : formatNumber(value), name]}
                 />
-                <Tooltip formatter={(value: number) => formatNumber(value)} />
                 <Legend />
-                <Bar dataKey="inputTokens" name="입력 토큰" fill="#06B6D4" radius={[0, 2, 2, 0]} />
-                <Bar dataKey="outputTokens" name="출력 토큰" fill="#EC4899" radius={[0, 2, 2, 0]} />
+                <Bar yAxisId="tokens" dataKey="inputTokens" name="입력 토큰" fill="#06B6D4" stackId="tokens" />
+                <Bar yAxisId="tokens" dataKey="outputTokens" name="출력 토큰" fill="#EC4899" stackId="tokens" radius={[2, 2, 0, 0]} />
+                <Line yAxisId="pct" type="monotone" dataKey="cumulativePct" name="누적 비율" stroke="#F59E0B" strokeWidth={2} dot={{ r: 3 }} />
               </BarChart>
             </ResponsiveContainer>
           )}
