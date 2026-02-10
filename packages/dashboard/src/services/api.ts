@@ -185,6 +185,9 @@ export const admin = {
     modelDailyTrend: (params?: Record<string, unknown>) =>
       api.get('/admin/stats/model-daily-trend', { params }).then((r) => r.data),
 
+    deptDailyTrend: (params?: Record<string, unknown>) =>
+      api.get('/admin/stats/dept-daily-trend', { params }).then((r) => r.data),
+
     latency: () => api.get('/admin/stats/latency').then((r) => r.data),
 
     latencyHistory: (params?: Record<string, unknown>) =>

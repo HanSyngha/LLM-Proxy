@@ -491,6 +491,56 @@ adminStatsRoutes.get('/model-daily-trend', async (req: AuthenticatedRequest, res
 });
 
 /**
+ * GET /admin/stats/dept-daily-trend - Per-department daily usage + unique users
+ */
+adminStatsRoutes.get('/dept-daily-trend', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const days = parseDays(req.query as Record<string, string | undefined>);
+    const since = daysAgo(days);
+
+    // Token/request totals grouped by date + deptname
+    const trendData = await prisma.dailyUsageStat.groupBy({
+      by: ['date', 'deptname'],
+      where: { date: { gte: since } },
+      _sum: {
+        totalInputTokens: true,
+        totalOutputTokens: true,
+        requestCount: true,
+      },
+      orderBy: { date: 'asc' },
+    });
+
+    // Unique users per date + deptname
+    const userCountData: Array<{ date: Date; deptname: string; users: bigint }> = await prisma.$queryRaw`
+      SELECT date, deptname, COUNT(DISTINCT user_id) as users
+      FROM daily_usage_stats
+      WHERE date >= ${since}
+      GROUP BY date, deptname
+      ORDER BY date ASC
+    `;
+
+    const userMap = new Map<string, number>();
+    for (const row of userCountData) {
+      userMap.set(`${toDateString(new Date(row.date))}|${row.deptname || ''}`, Number(row.users));
+    }
+
+    const data = trendData.map(row => ({
+      date: toDateString(row.date),
+      deptname: row.deptname || 'Unknown',
+      requests: row._sum.requestCount || 0,
+      inputTokens: row._sum.totalInputTokens || 0,
+      outputTokens: row._sum.totalOutputTokens || 0,
+      users: userMap.get(`${toDateString(row.date)}|${row.deptname || ''}`) || 0,
+    }));
+
+    res.json({ data, days });
+  } catch (error) {
+    console.error('Error fetching dept daily trend:', error);
+    res.status(500).json({ error: 'Failed to fetch department daily trend' });
+  }
+});
+
+/**
  * GET /admin/stats/latency - Current latency stats per model
  */
 adminStatsRoutes.get('/latency', async (req: AuthenticatedRequest, res: Response) => {

@@ -13,8 +13,6 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import {
-  BarChart,
-  Bar,
   LineChart,
   Line,
   AreaChart,
@@ -94,6 +92,8 @@ function LoadingSkeleton() {
   );
 }
 
+type DeptDailyRow = { date: string; deptname: string; inputTokens: number; outputTokens: number; users: number };
+
 export default function AdminDashboard() {
   const { data: overview, isLoading: loadingOverview, error: overviewError, refetch: refetchOverview } = useQuery({
     queryKey: ['admin', 'stats', 'overview'],
@@ -119,9 +119,9 @@ export default function AdminDashboard() {
     refetchInterval: 30_000,
   });
 
-  const { data: deptData, isLoading: loadingDepts } = useQuery({
-    queryKey: ['admin', 'stats', 'byDept'],
-    queryFn: () => api.admin.stats.byDept({}),
+  const { data: deptDailyData, isLoading: loadingDeptDaily } = useQuery({
+    queryKey: ['admin', 'stats', 'deptDailyTrend'],
+    queryFn: () => api.admin.stats.deptDailyTrend({ days: 30 }),
     refetchInterval: 30_000,
   });
 
@@ -143,9 +143,9 @@ export default function AdminDashboard() {
     refetchInterval: 30_000,
   });
 
-  const isLoading = loadingOverview || loadingDaily || loadingUsers || loadingModels || loadingDepts || loadingDau || loadingLatency || loadingLatencyHistory;
+  const isLoading = loadingOverview || loadingDaily || loadingUsers || loadingModels || loadingDeptDaily || loadingDau || loadingLatency || loadingLatencyHistory;
 
-  // All hooks must be called before any early return (React rules of hooks)
+  // All hooks & computed values must be before any early return (React rules of hooks)
   const stats = overview;
   const bizAvg = dailyData?.averages?.businessDays;
   const avgDailyTokens = bizAvg
@@ -162,6 +162,7 @@ export default function AdminDashboard() {
     modelName: m.model?.displayName || m.model?.name || 'Unknown',
   }));
 
+  // Cumulative daily token chart
   const cumulativeDailyData = useMemo(() => {
     const data = dailyData?.data ?? [];
     let cumInput = 0, cumOutput = 0;
@@ -172,17 +173,72 @@ export default function AdminDashboard() {
     });
   }, [dailyData]);
 
-  const deptChartData = deptData?.data ?? [];
+  // Latency history: pivot to per-model lines { hour, ModelA, ModelB, ... }
+  const { latencyChartData, latencyModelNames } = useMemo(() => {
+    const raw = (latencyHistory?.data ?? []) as Array<{ hour: string; modelName: string; avgLatencyMs: number }>;
+    const models = [...new Set(raw.map(r => r.modelName))];
+    const hourMap = new Map<string, Record<string, number>>();
+    for (const row of raw) {
+      if (!hourMap.has(row.hour)) hourMap.set(row.hour, {});
+      hourMap.get(row.hour)![row.modelName] = row.avgLatencyMs;
+    }
+    const chartData = [...hourMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([hour, vals]) => ({ hour, ...vals }));
+    return { latencyChartData: chartData, latencyModelNames: models };
+  }, [latencyHistory]);
 
-  const cumulativeDeptData = useMemo(() => {
-    const data = deptChartData as Array<{ deptname: string; inputTokens: number; outputTokens: number }>;
-    let cumTotal = 0;
-    const totalAll = data.reduce((sum, d) => sum + d.inputTokens + d.outputTokens, 0);
-    return data.map(d => {
-      cumTotal += d.inputTokens + d.outputTokens;
-      return { ...d, cumulativePct: totalAll > 0 ? Math.round(cumTotal / totalAll * 100) : 0 };
+  // Dept daily trend: cumulative tokens per dept over time
+  const { deptTokenChartData, deptTokenNames } = useMemo(() => {
+    const raw = (deptDailyData?.data ?? []) as DeptDailyRow[];
+    const depts = [...new Set(raw.map(r => r.deptname))];
+    const dates = [...new Set(raw.map(r => r.date))].sort();
+
+    // Build lookup: date|dept -> tokens
+    const lookup = new Map<string, number>();
+    for (const r of raw) {
+      lookup.set(`${r.date}|${r.deptname}`, r.inputTokens + r.outputTokens);
+    }
+
+    // Compute cumulative per dept
+    const cumulative: Record<string, number> = {};
+    for (const d of depts) cumulative[d] = 0;
+
+    const chartData = dates.map(date => {
+      const row: Record<string, unknown> = { date };
+      for (const d of depts) {
+        cumulative[d] += lookup.get(`${date}|${d}`) || 0;
+        row[d] = cumulative[d];
+      }
+      return row;
     });
-  }, [deptChartData]);
+    return { deptTokenChartData: chartData, deptTokenNames: depts };
+  }, [deptDailyData]);
+
+  // Dept daily trend: cumulative users per dept over time
+  const { deptUserChartData, deptUserNames } = useMemo(() => {
+    const raw = (deptDailyData?.data ?? []) as DeptDailyRow[];
+    const depts = [...new Set(raw.map(r => r.deptname))];
+    const dates = [...new Set(raw.map(r => r.date))].sort();
+
+    const lookup = new Map<string, number>();
+    for (const r of raw) {
+      lookup.set(`${r.date}|${r.deptname}`, r.users);
+    }
+
+    const cumulative: Record<string, number> = {};
+    for (const d of depts) cumulative[d] = 0;
+
+    const chartData = dates.map(date => {
+      const row: Record<string, unknown> = { date };
+      for (const d of depts) {
+        cumulative[d] += lookup.get(`${date}|${d}`) || 0;
+        row[d] = cumulative[d];
+      }
+      return row;
+    });
+    return { deptUserChartData: chartData, deptUserNames: depts };
+  }, [deptDailyData]);
 
   const topUsersData = (topUsers?.data ?? []).map((u: { user?: { loginid?: string; username?: string }; requests: number; inputTokens: number; outputTokens: number }) => ({
     ...u,
@@ -249,7 +305,7 @@ export default function AdminDashboard() {
         <StatCard icon={AlertTriangle} label="에러율" value={`${(stats?.errorRate ?? 0).toFixed(1)}%`} color="bg-red-500" />
       </div>
 
-      {/* Charts Row 1 */}
+      {/* Charts Row 1: Daily usage + DAU */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Daily Usage Trend - Cumulative stacked area */}
         <div className="bg-white rounded-xl shadow-card p-6">
@@ -260,11 +316,7 @@ export default function AdminDashboard() {
             <ResponsiveContainer width="100%" height={280}>
               <AreaChart data={cumulativeDailyData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v: string) => v.slice(5)}
-                />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v: string) => v.slice(5)} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
                 <Tooltip
                   formatter={(value: number, name: string) => [formatNumber(value), name]}
@@ -287,31 +339,67 @@ export default function AdminDashboard() {
             <ResponsiveContainer width="100%" height={280}>
               <LineChart data={dauData?.data ?? []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v: string) => v.slice(5)}
-                />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v: string) => v.slice(5)} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip labelFormatter={(label: string) => `날짜: ${label}`} />
-                <Line
-                  type="monotone"
-                  dataKey="activeUsers"
-                  name="활성 사용자"
-                  stroke="#10B981"
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                  activeDot={{ r: 5 }}
-                />
+                <Line type="monotone" dataKey="activeUsers" name="활성 사용자" stroke="#10B981" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
               </LineChart>
             </ResponsiveContainer>
           )}
         </div>
       </div>
 
-      {/* Charts Row 2 */}
+      {/* Charts Row 2: Dept tokens (cumulative) + Dept users (cumulative) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Model Usage */}
+        {/* Department Token Usage - Cumulative line chart */}
+        <div className="bg-white rounded-xl shadow-card p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">부서별 토큰 사용량 (누적, 30일)</h3>
+          {loadingDeptDaily ? (
+            <div className="h-64 bg-gray-50 rounded animate-pulse" />
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={deptTokenChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v: string) => v.slice(5)} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
+                <Tooltip
+                  formatter={(value: number, name: string) => [formatNumber(value), name]}
+                  labelFormatter={(label: string) => `날짜: ${label}`}
+                />
+                <Legend />
+                {deptTokenNames.map((dept, i) => (
+                  <Line key={dept} type="monotone" dataKey={dept} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Department Users - Cumulative line chart */}
+        <div className="bg-white rounded-xl shadow-card p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">부서별 사용자 (누적, 30일)</h3>
+          {loadingDeptDaily ? (
+            <div className="h-64 bg-gray-50 rounded animate-pulse" />
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={deptUserChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v: string) => v.slice(5)} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip labelFormatter={(label: string) => `날짜: ${label}`} />
+                <Legend />
+                {deptUserNames.map((dept, i) => (
+                  <Line key={dept} type="monotone" dataKey={dept} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* Charts Row 3: Model pie + Latency per-model line */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Model Usage Pie */}
         <div className="bg-white rounded-xl shadow-card p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">모델별 사용량</h3>
           {loadingModels ? (
@@ -341,119 +429,73 @@ export default function AdminDashboard() {
           )}
         </div>
 
-        {/* Department Usage - Cumulative (Pareto) */}
+        {/* Latency History - Per-model line chart */}
         <div className="bg-white rounded-xl shadow-card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">부서별 사용량 (누적)</h3>
-          {loadingDepts ? (
-            <div className="h-64 bg-gray-50 rounded animate-pulse" />
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={cumulativeDeptData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="deptname" tick={{ fontSize: 10 }} interval={0} angle={-20} textAnchor="end" height={50} />
-                <YAxis yAxisId="tokens" tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
-                <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v}%`} domain={[0, 100]} />
-                <Tooltip
-                  formatter={(value: number, name: string) => [name === '누적 비율' ? `${value}%` : formatNumber(value), name]}
-                />
-                <Legend />
-                <Bar yAxisId="tokens" dataKey="inputTokens" name="입력 토큰" fill="#06B6D4" stackId="tokens" />
-                <Bar yAxisId="tokens" dataKey="outputTokens" name="출력 토큰" fill="#EC4899" stackId="tokens" radius={[2, 2, 0, 0]} />
-                <Line yAxisId="pct" type="monotone" dataKey="cumulativePct" name="누적 비율" stroke="#F59E0B" strokeWidth={2} dot={{ r: 3 }} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
-
-      {/* Latency Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Latency Table */}
-        <div className="bg-white rounded-xl shadow-card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <Clock className="w-5 h-5 text-indigo-500" />
-            모델별 Latency (최근 1시간)
-          </h3>
-          {loadingLatency ? (
-            <div className="space-y-3">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />
-              ))}
-            </div>
-          ) : latencyModels.length === 0 ? (
-            <p className="text-gray-400 text-sm text-center py-8">최근 1시간 데이터 없음</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-3 px-3 font-medium text-gray-500">모델</th>
-                    <th className="text-right py-3 px-3 font-medium text-gray-500">Avg</th>
-                    <th className="text-right py-3 px-3 font-medium text-gray-500">P50</th>
-                    <th className="text-right py-3 px-3 font-medium text-gray-500">P95</th>
-                    <th className="text-right py-3 px-3 font-medium text-gray-500">요청</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {latencyModels.map((m) => (
-                    <tr key={m.modelName} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="py-2.5 px-3 font-medium text-gray-900">{m.modelName}</td>
-                      <td className="py-2.5 px-3 text-right text-gray-700">{m.avgLatencyMs}ms</td>
-                      <td className="py-2.5 px-3 text-right text-gray-700">{m.p50LatencyMs ?? '-'}ms</td>
-                      <td className="py-2.5 px-3 text-right text-gray-700">{m.p95LatencyMs ?? '-'}ms</td>
-                      <td className="py-2.5 px-3 text-right text-gray-600">{m.requestCount}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Latency History Chart */}
-        <div className="bg-white rounded-xl shadow-card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Latency 추이 (24시간)</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">모델별 Latency 추이 (24시간)</h3>
           {loadingLatencyHistory ? (
             <div className="h-64 bg-gray-50 rounded animate-pulse" />
+          ) : latencyChartData.length === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-8">최근 24시간 데이터 없음</p>
           ) : (
             <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={(() => {
-                // Aggregate per-model-hour data into per-hour
-                const hourMap = new Map<string, { totalLatency: number; maxP95: number; count: number }>();
-                for (const row of (latencyHistory?.data ?? []) as Array<{ hour: string; avgLatencyMs: number; p95LatencyMs: number; requestCount: number }>) {
-                  const existing = hourMap.get(row.hour);
-                  if (existing) {
-                    existing.totalLatency += row.avgLatencyMs * row.requestCount;
-                    existing.maxP95 = Math.max(existing.maxP95, row.p95LatencyMs);
-                    existing.count += row.requestCount;
-                  } else {
-                    hourMap.set(row.hour, { totalLatency: row.avgLatencyMs * row.requestCount, maxP95: row.p95LatencyMs, count: row.requestCount });
-                  }
-                }
-                return [...hourMap.entries()].map(([hour, v]) => ({
-                  hour,
-                  avgLatencyMs: Math.round(v.totalLatency / v.count),
-                  p95LatencyMs: Math.round(v.maxP95),
-                }));
-              })()}>
+              <LineChart data={latencyChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis
-                  dataKey="hour"
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v: string) => v?.slice(11, 16) ?? v}
-                />
+                <XAxis dataKey="hour" tick={{ fontSize: 11 }} tickFormatter={(v: string) => v?.slice(11, 16) ?? v} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v}ms`} />
                 <Tooltip
                   formatter={(value: number, name: string) => [`${value}ms`, name]}
                   labelFormatter={(label: string) => `시간: ${label?.slice(11, 16) ?? label}`}
                 />
                 <Legend />
-                <Line type="monotone" dataKey="avgLatencyMs" name="평균 Latency" stroke="#6366F1" strokeWidth={2} dot={{ r: 2 }} />
-                <Line type="monotone" dataKey="p95LatencyMs" name="P95 Latency" stroke="#EF4444" strokeWidth={1.5} strokeDasharray="5 5" dot={false} />
+                {latencyModelNames.map((model, i) => (
+                  <Line key={model} type="monotone" dataKey={model} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                ))}
               </LineChart>
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+
+      {/* Latency Table */}
+      <div className="bg-white rounded-xl shadow-card p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <Clock className="w-5 h-5 text-indigo-500" />
+          모델별 Latency (최근 1시간)
+        </h3>
+        {loadingLatency ? (
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />
+            ))}
+          </div>
+        ) : latencyModels.length === 0 ? (
+          <p className="text-gray-400 text-sm text-center py-8">최근 1시간 데이터 없음</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-3 px-3 font-medium text-gray-500">모델</th>
+                  <th className="text-right py-3 px-3 font-medium text-gray-500">Avg</th>
+                  <th className="text-right py-3 px-3 font-medium text-gray-500">P50</th>
+                  <th className="text-right py-3 px-3 font-medium text-gray-500">P95</th>
+                  <th className="text-right py-3 px-3 font-medium text-gray-500">요청</th>
+                </tr>
+              </thead>
+              <tbody>
+                {latencyModels.map((m) => (
+                  <tr key={m.modelName} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <td className="py-2.5 px-3 font-medium text-gray-900">{m.modelName}</td>
+                    <td className="py-2.5 px-3 text-right text-gray-700">{m.avgLatencyMs}ms</td>
+                    <td className="py-2.5 px-3 text-right text-gray-700">{m.p50LatencyMs ?? '-'}ms</td>
+                    <td className="py-2.5 px-3 text-right text-gray-700">{m.p95LatencyMs ?? '-'}ms</td>
+                    <td className="py-2.5 px-3 text-right text-gray-600">{m.requestCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Top Users Table */}
