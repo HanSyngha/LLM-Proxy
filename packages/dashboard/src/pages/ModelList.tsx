@@ -88,8 +88,10 @@ export default function ModelList() {
                   <Cpu size={18} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="font-semibold text-gray-900 truncate">{model.displayName}</h3>
-                  <p className="text-xs text-gray-400 font-mono mt-0.5 truncate">{model.name}</p>
+                  <h3 className="font-semibold text-gray-900 truncate font-mono">{model.name}</h3>
+                  {model.displayName !== model.name && (
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{model.displayName}</p>
+                  )}
                 </div>
               </div>
 
