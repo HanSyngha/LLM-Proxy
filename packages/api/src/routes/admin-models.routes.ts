@@ -7,35 +7,37 @@ export const adminModelsRoutes = Router();
 // ============================================
 // Helper: Health check a model endpoint
 // ============================================
-async function testEndpointHealth(
+interface TestResult {
+  passed: boolean;
+  latencyMs: number;
+  message: string;
+  statusCode?: number;
+}
+
+function normalizeChatCompletionsUrl(endpointUrl: string): string {
+  let url = endpointUrl.trim().replace(/\/+$/, '');
+  if (url.endsWith('/chat/completions')) return url;
+  if (url.endsWith('/v1')) return `${url}/chat/completions`;
+  return `${url}/chat/completions`;
+}
+
+async function runSingleTest(
   endpointUrl: string,
-  apiKey?: string | null,
-  extraHeaders?: Record<string, string> | null,
-  modelName?: string | null
-): Promise<{ success: boolean; latencyMs: number; error?: string; statusCode?: number }> {
+  apiKey: string | null | undefined,
+  extraHeaders: Record<string, string> | null | undefined,
+  body: Record<string, unknown>
+): Promise<TestResult> {
+  const url = normalizeChatCompletionsUrl(endpointUrl);
   const start = Date.now();
   try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (apiKey) {
-      headers['Authorization'] = `Bearer ${apiKey}`;
-    }
-    if (extraHeaders) {
-      Object.assign(headers, extraHeaders);
-    }
-
-    const body = {
-      model: modelName || 'gpt-4',
-      messages: [{ role: 'user', content: 'Hello' }],
-      max_tokens: 5,
-      stream: false,
-    };
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    if (extraHeaders) Object.assign(headers, extraHeaders);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
 
-    const response = await fetch(endpointUrl, {
+    const response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -47,20 +49,60 @@ async function testEndpointHealth(
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'No response body');
-      return {
-        success: false,
-        latencyMs,
-        error: `HTTP ${response.status}: ${errorText.substring(0, 500)}`,
-        statusCode: response.status,
-      };
+      return { passed: false, latencyMs, message: `HTTP ${response.status}: ${errorText.substring(0, 300)}`, statusCode: response.status };
     }
 
-    return { success: true, latencyMs, statusCode: response.status };
+    return { passed: true, latencyMs, message: 'OK', statusCode: response.status };
   } catch (error) {
     const latencyMs = Date.now() - start;
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, latencyMs, error: message };
+    return { passed: false, latencyMs, message: error instanceof Error ? error.message : 'Unknown error' };
   }
+}
+
+async function testEndpointHealth(
+  endpointUrl: string,
+  apiKey?: string | null,
+  extraHeaders?: Record<string, string> | null,
+  modelName?: string | null
+): Promise<{
+  chatCompletion: TestResult;
+  toolCall: TestResult;
+  allPassed: boolean;
+}> {
+  const model = modelName || 'gpt-4';
+
+  const chatBody = {
+    model,
+    messages: [{ role: 'user', content: 'Hello' }],
+    max_tokens: 5,
+    stream: false,
+  };
+
+  const toolBody = {
+    model,
+    messages: [{ role: 'user', content: 'What is the weather in Seoul?' }],
+    tools: [{
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        description: 'Get current weather',
+        parameters: {
+          type: 'object',
+          properties: { location: { type: 'string', description: 'City name' } },
+          required: ['location'],
+        },
+      },
+    }],
+    max_tokens: 50,
+    stream: false,
+  };
+
+  const [chatCompletion, toolCall] = await Promise.all([
+    runSingleTest(endpointUrl, apiKey, extraHeaders, chatBody),
+    runSingleTest(endpointUrl, apiKey, extraHeaders, toolBody),
+  ]);
+
+  return { chatCompletion, toolCall, allPassed: chatCompletion.passed && toolCall.passed };
 }
 
 // ============================================
@@ -424,12 +466,13 @@ adminModelsRoutes.get('/:modelId/sub-models', async (req: AuthenticatedRequest, 
 adminModelsRoutes.post('/:modelId/sub-models', requireWriteAccess, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { modelId } = req.params;
-    const { modelName, endpointUrl, apiKey, extraHeaders, enabled } = req.body as {
+    const { modelName, endpointUrl, apiKey, extraHeaders, enabled, sortOrder } = req.body as {
       modelName?: string;
       endpointUrl?: string;
       apiKey?: string;
       extraHeaders?: Record<string, string>;
       enabled?: boolean;
+      sortOrder?: number;
     };
 
     const model = await prisma.model.findUnique({ where: { id: modelId } });
@@ -443,11 +486,16 @@ adminModelsRoutes.post('/:modelId/sub-models', requireWriteAccess, async (req: A
       return;
     }
 
-    const maxSort = await prisma.subModel.aggregate({
-      where: { parentId: modelId },
-      _max: { sortOrder: true },
-    });
-    const nextSortOrder = (maxSort._max.sortOrder ?? -1) + 1;
+    let finalSortOrder: number;
+    if (sortOrder !== undefined) {
+      finalSortOrder = sortOrder;
+    } else {
+      const maxSort = await prisma.subModel.aggregate({
+        where: { parentId: modelId },
+        _max: { sortOrder: true },
+      });
+      finalSortOrder = (maxSort._max.sortOrder ?? -1) + 1;
+    }
 
     const subModel = await prisma.subModel.create({
       data: {
@@ -457,7 +505,7 @@ adminModelsRoutes.post('/:modelId/sub-models', requireWriteAccess, async (req: A
         apiKey: apiKey || undefined,
         extraHeaders: extraHeaders || undefined,
         enabled: enabled ?? true,
-        sortOrder: nextSortOrder,
+        sortOrder: finalSortOrder,
       },
     });
 

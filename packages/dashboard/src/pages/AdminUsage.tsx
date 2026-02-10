@@ -65,6 +65,16 @@ function exportToCsv(data: Record<string, unknown>[], filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function SummaryCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <p className="text-sm text-gray-500">{label}</p>
+      <p className="text-xl font-bold text-gray-900 mt-1">{value}</p>
+      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
 export default function AdminUsage() {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [preset, setPreset] = useState<Preset>('30d');
@@ -112,7 +122,7 @@ export default function AdminUsage() {
 
   const { data: dauData, isLoading: loadingDau } = useQuery({
     queryKey: ['admin', 'usage', 'dau', dateRange],
-    queryFn: () => api.admin.stats.dau({ ...dateRange }),
+    queryFn: () => api.admin.stats.dau({ ...dateRange, excludeHolidays: true }),
     enabled: activeTab === 'overview',
   });
 
@@ -175,6 +185,9 @@ export default function AdminUsage() {
       </div>
     );
   }
+
+  // Business day averages
+  const bizAvg = dailyData?.averages?.businessDays;
 
   return (
     <div className="space-y-6">
@@ -253,6 +266,29 @@ export default function AdminUsage() {
       {/* Tab Content */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
+          {/* Business Day Averages */}
+          {bizAvg && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <SummaryCard
+                label="일평균 요청 (영업일)"
+                value={formatNumber(Math.round(bizAvg.avgRequests ?? 0))}
+              />
+              <SummaryCard
+                label="일평균 입력 토큰 (영업일)"
+                value={formatNumber(Math.round(bizAvg.avgInputTokens ?? 0))}
+              />
+              <SummaryCard
+                label="일평균 출력 토큰 (영업일)"
+                value={formatNumber(Math.round(bizAvg.avgOutputTokens ?? 0))}
+              />
+              <SummaryCard
+                label="영업일 수"
+                value={`${bizAvg.days ?? 0}일`}
+                sub={`전체 ${dailyData?.averages?.all?.days ?? 0}일 중`}
+              />
+            </div>
+          )}
+
           {/* Daily Trend */}
           <div className="bg-white rounded-xl shadow-card p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">일별 사용량 추이</h3>
@@ -268,8 +304,8 @@ export default function AdminUsage() {
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
                   <Tooltip formatter={(value: number) => formatNumber(value)} />
                   <Legend />
-                  <Area type="monotone" dataKey="requests" name="요청 수" stroke="#6366F1" fill="#6366F1" fillOpacity={0.1} />
-                  <Area type="monotone" dataKey="outputTokens" name="출력 토큰" stroke="#8B5CF6" fill="#8B5CF6" fillOpacity={0.1} />
+                  <Area type="monotone" dataKey="inputTokens" name="입력 토큰" stroke="#06B6D4" fill="#06B6D4" fillOpacity={0.15} />
+                  <Area type="monotone" dataKey="outputTokens" name="출력 토큰" stroke="#8B5CF6" fill="#8B5CF6" fillOpacity={0.15} />
                 </AreaChart>
               </ResponsiveContainer>
             )}
@@ -278,7 +314,7 @@ export default function AdminUsage() {
           {/* DAU + Model Usage */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl shadow-card p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">누적 활성 사용자</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">일별 활성 사용자 (주말/휴일 제외)</h3>
               {loadingDau ? (
                 <div className="h-64 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-brand-500" /></div>
               ) : (
@@ -305,6 +341,8 @@ export default function AdminUsage() {
                     <XAxis dataKey="modelName" tick={{ fontSize: 10 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatNumber(v)} />
                     <Tooltip formatter={(value: number) => formatNumber(value)} />
+                    <Legend />
+                    <Bar dataKey="inputTokens" name="입력 토큰" fill="#06B6D4" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="outputTokens" name="출력 토큰" radius={[4, 4, 0, 0]}>
                       {modelChartData.map((_: unknown, i: number) => (
                         <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -333,6 +371,7 @@ export default function AdminUsage() {
                   <Tooltip formatter={(value: number) => formatNumber(value)} />
                   <Legend />
                   <Bar dataKey="requests" name="요청 수" fill="#6366F1" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="inputTokens" name="입력 토큰" fill="#06B6D4" radius={[0, 4, 4, 0]} />
                   <Bar dataKey="outputTokens" name="출력 토큰" fill="#EC4899" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -348,15 +387,17 @@ export default function AdminUsage() {
                     <th className="text-left py-3 px-4 font-medium text-gray-500">사용자 ID</th>
                     <th className="text-left py-3 px-4 font-medium text-gray-500">이름</th>
                     <th className="text-right py-3 px-4 font-medium text-gray-500">요청 수</th>
+                    <th className="text-right py-3 px-4 font-medium text-gray-500">입력 토큰</th>
                     <th className="text-right py-3 px-4 font-medium text-gray-500">출력 토큰</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {userChartData.map((u: { loginid: string; username: string; requests: number; outputTokens: number }) => (
+                  {userChartData.map((u: { loginid: string; username: string; requests: number; inputTokens: number; outputTokens: number }) => (
                     <tr key={u.loginid} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-2.5 px-4 font-mono text-gray-700">{u.loginid}</td>
                       <td className="py-2.5 px-4 text-gray-900">{u.username}</td>
                       <td className="py-2.5 px-4 text-right">{u.requests.toLocaleString()}</td>
+                      <td className="py-2.5 px-4 text-right text-gray-600">{u.inputTokens.toLocaleString()}</td>
                       <td className="py-2.5 px-4 text-right font-medium">{u.outputTokens.toLocaleString()}</td>
                     </tr>
                   ))}
@@ -382,6 +423,7 @@ export default function AdminUsage() {
                   <Tooltip formatter={(value: number) => formatNumber(value)} />
                   <Legend />
                   <Bar dataKey="requests" name="요청 수" fill="#6366F1" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="inputTokens" name="입력 토큰" fill="#06B6D4" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="outputTokens" name="출력 토큰" fill="#EC4899" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -395,14 +437,16 @@ export default function AdminUsage() {
                   <tr className="border-b bg-gray-50">
                     <th className="text-left py-3 px-4 font-medium text-gray-500">모델</th>
                     <th className="text-right py-3 px-4 font-medium text-gray-500">요청 수</th>
+                    <th className="text-right py-3 px-4 font-medium text-gray-500">입력 토큰</th>
                     <th className="text-right py-3 px-4 font-medium text-gray-500">출력 토큰</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {modelChartData.map((m: { modelName: string; requests: number; outputTokens: number }) => (
+                  {modelChartData.map((m: { modelName: string; requests: number; inputTokens: number; outputTokens: number }) => (
                     <tr key={m.modelName} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-2.5 px-4 font-medium text-gray-900">{m.modelName}</td>
                       <td className="py-2.5 px-4 text-right">{m.requests.toLocaleString()}</td>
+                      <td className="py-2.5 px-4 text-right text-gray-600">{m.inputTokens.toLocaleString()}</td>
                       <td className="py-2.5 px-4 text-right font-medium">{m.outputTokens.toLocaleString()}</td>
                     </tr>
                   ))}
@@ -428,6 +472,7 @@ export default function AdminUsage() {
                   <Tooltip formatter={(value: number) => formatNumber(value)} />
                   <Legend />
                   <Bar dataKey="requests" name="요청 수" fill="#6366F1" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="inputTokens" name="입력 토큰" fill="#06B6D4" radius={[0, 4, 4, 0]} />
                   <Bar dataKey="outputTokens" name="출력 토큰" fill="#F59E0B" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -441,14 +486,16 @@ export default function AdminUsage() {
                   <tr className="border-b bg-gray-50">
                     <th className="text-left py-3 px-4 font-medium text-gray-500">부서</th>
                     <th className="text-right py-3 px-4 font-medium text-gray-500">요청 수</th>
+                    <th className="text-right py-3 px-4 font-medium text-gray-500">입력 토큰</th>
                     <th className="text-right py-3 px-4 font-medium text-gray-500">출력 토큰</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(deptData?.data ?? []).map((d: { deptname: string; requests: number; outputTokens: number }) => (
+                  {(deptData?.data ?? []).map((d: { deptname: string; requests: number; inputTokens: number; outputTokens: number }) => (
                     <tr key={d.deptname} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-2.5 px-4 font-medium text-gray-900">{d.deptname}</td>
                       <td className="py-2.5 px-4 text-right">{d.requests.toLocaleString()}</td>
+                      <td className="py-2.5 px-4 text-right text-gray-600">{d.inputTokens.toLocaleString()}</td>
                       <td className="py-2.5 px-4 text-right font-medium">{d.outputTokens.toLocaleString()}</td>
                     </tr>
                   ))}
@@ -473,15 +520,17 @@ export default function AdminUsage() {
                       <th className="text-left py-3 px-4 font-semibold text-gray-600">토큰 이름</th>
                       <th className="text-left py-3 px-4 font-semibold text-gray-600">사용자</th>
                       <th className="text-right py-3 px-4 font-semibold text-gray-600">요청 수</th>
+                      <th className="text-right py-3 px-4 font-semibold text-gray-600">입력 토큰</th>
                       <th className="text-right py-3 px-4 font-semibold text-gray-600">출력 토큰</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {tokenChartData.map((t: { tokenName: string; loginid: string; requests: number; outputTokens: number }, i: number) => (
+                    {tokenChartData.map((t: { tokenName: string; loginid: string; requests: number; inputTokens: number; outputTokens: number }, i: number) => (
                       <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
                         <td className="py-2.5 px-4 font-medium text-gray-900">{t.tokenName || 'N/A'}</td>
                         <td className="py-2.5 px-4 text-gray-600">{t.loginid || '-'}</td>
                         <td className="py-2.5 px-4 text-right">{t.requests.toLocaleString()}</td>
+                        <td className="py-2.5 px-4 text-right text-gray-600">{t.inputTokens.toLocaleString()}</td>
                         <td className="py-2.5 px-4 text-right font-medium">{t.outputTokens.toLocaleString()}</td>
                       </tr>
                     ))}

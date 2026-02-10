@@ -108,7 +108,51 @@ adminStatsRoutes.get('/daily', async (req: AuthenticatedRequest, res: Response) 
       outputTokens: row._sum.totalOutputTokens || 0,
     }));
 
-    res.json({ data, days });
+    // Compute averages (all days vs business days)
+    const holidays = await prisma.holiday.findMany({
+      where: { date: { gte: since } },
+      select: { date: true },
+    });
+    const holidaySet = new Set(holidays.map(h => h.date.toISOString().split('T')[0]));
+
+    let allInput = 0, allOutput = 0, allRequests = 0;
+    let bizInput = 0, bizOutput = 0, bizRequests = 0, bizDays = 0;
+
+    for (const d of data) {
+      allInput += d.inputTokens;
+      allOutput += d.outputTokens;
+      allRequests += d.requests;
+
+      const dow = new Date(d.date).getDay();
+      if (dow !== 0 && dow !== 6 && !holidaySet.has(d.date)) {
+        bizInput += d.inputTokens;
+        bizOutput += d.outputTokens;
+        bizRequests += d.requests;
+        bizDays++;
+      }
+    }
+
+    const totalDays = data.length || 1;
+    const bDays = bizDays || 1;
+
+    res.json({
+      data,
+      days,
+      averages: {
+        all: {
+          avgInputTokens: Math.round(allInput / totalDays),
+          avgOutputTokens: Math.round(allOutput / totalDays),
+          avgRequests: Math.round(allRequests / totalDays),
+          days: totalDays,
+        },
+        businessDays: {
+          avgInputTokens: Math.round(bizInput / bDays),
+          avgOutputTokens: Math.round(bizOutput / bDays),
+          avgRequests: Math.round(bizRequests / bDays),
+          days: bizDays,
+        },
+      },
+    });
   } catch (error) {
     console.error('Error fetching daily stats:', error);
     res.status(500).json({ error: 'Failed to fetch daily stats' });
@@ -293,22 +337,36 @@ adminStatsRoutes.get('/daily-active-users', async (req: AuthenticatedRequest, re
   try {
     const days = parseDays(req.query as Record<string, string | undefined>);
     const since = daysAgo(days);
+    const excludeHolidays = (req.query as Record<string, string>).excludeHolidays === 'true';
 
-    // Count distinct users per day using raw query
-    const distinctDau = await prisma.$queryRaw<Array<{ date: Date; dau: bigint }>>`
-      SELECT date, COUNT(DISTINCT user_id) as dau
-      FROM daily_usage_stats
-      WHERE date >= ${since}
-      GROUP BY date
-      ORDER BY date ASC
-    `;
+    let distinctDau: Array<{ date: Date; dau: bigint }>;
+
+    if (excludeHolidays) {
+      distinctDau = await prisma.$queryRaw<Array<{ date: Date; dau: bigint }>>`
+        SELECT date, COUNT(DISTINCT user_id) as dau
+        FROM daily_usage_stats
+        WHERE date >= ${since}
+          AND EXTRACT(DOW FROM date) NOT IN (0, 6)
+          AND NOT EXISTS (SELECT 1 FROM holidays h WHERE h.date = daily_usage_stats.date)
+        GROUP BY date
+        ORDER BY date ASC
+      `;
+    } else {
+      distinctDau = await prisma.$queryRaw<Array<{ date: Date; dau: bigint }>>`
+        SELECT date, COUNT(DISTINCT user_id) as dau
+        FROM daily_usage_stats
+        WHERE date >= ${since}
+        GROUP BY date
+        ORDER BY date ASC
+      `;
+    }
 
     const data = distinctDau.map(row => ({
       date: new Date(row.date).toISOString().split('T')[0],
       activeUsers: Number(row.dau),
     }));
 
-    res.json({ data, days });
+    res.json({ data, days, excludeHolidays });
   } catch (error) {
     console.error('Error fetching DAU stats:', error);
     res.status(500).json({ error: 'Failed to fetch DAU stats' });
