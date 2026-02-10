@@ -18,14 +18,14 @@ adminRateLimitsRoutes.get('/', async (_req: AuthenticatedRequest, res: Response)
     });
 
     if (!config) {
-      // Return fallback defaults if not yet configured
+      // Return fallback defaults if not yet configured (0 = unlimited)
       res.json({
         config: {
           key: 'default',
-          rpmLimit: parseInt(process.env['DEFAULT_RPM'] || '60', 10),
-          tpmLimit: parseInt(process.env['DEFAULT_TPM'] || '100000', 10),
-          tphLimit: parseInt(process.env['DEFAULT_TPH'] || '1000000', 10),
-          tpdLimit: parseInt(process.env['DEFAULT_TPD'] || '10000000', 10),
+          rpmLimit: parseInt(process.env['DEFAULT_RPM'] || '0', 10),
+          tpmLimit: parseInt(process.env['DEFAULT_TPM'] || '0', 10),
+          tphLimit: parseInt(process.env['DEFAULT_TPH'] || '0', 10),
+          tpdLimit: parseInt(process.env['DEFAULT_TPD'] || '0', 10),
           updatedAt: null,
         },
       });
