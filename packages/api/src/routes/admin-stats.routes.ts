@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { prisma, redis } from '../index.js';
 import { AuthenticatedRequest } from '../middleware/dashboardAuth.js';
 import { getActiveUserCount, getTodayUsage } from '../services/redis.service.js';
+import { toDateString, toDateTimeString } from '../utils/date.js';
 
 export const adminStatsRoutes = Router();
 
@@ -101,27 +102,41 @@ adminStatsRoutes.get('/daily', async (req: AuthenticatedRequest, res: Response) 
       orderBy: { date: 'asc' },
     });
 
-    const data = dailyStats.map(row => ({
-      date: row.date.toISOString().split('T')[0],
+    const rawData = dailyStats.map(row => ({
+      date: toDateString(row.date),
       requests: row._sum.requestCount || 0,
       inputTokens: row._sum.totalInputTokens || 0,
       outputTokens: row._sum.totalOutputTokens || 0,
     }));
+
+    // Fill date gaps with zeros
+    const dataMap = new Map(rawData.map(d => [d.date, d]));
+    const data: typeof rawData = [];
+    const cursor = new Date(since);
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    while (cursor <= today) {
+      const dateStr = toDateString(cursor);
+      data.push(dataMap.get(dateStr) || { date: dateStr, requests: 0, inputTokens: 0, outputTokens: 0 });
+      cursor.setDate(cursor.getDate() + 1);
+    }
 
     // Compute averages (all days vs business days)
     const holidays = await prisma.holiday.findMany({
       where: { date: { gte: since } },
       select: { date: true },
     });
-    const holidaySet = new Set(holidays.map(h => h.date.toISOString().split('T')[0]));
+    const holidaySet = new Set(holidays.map(h => toDateString(h.date)));
 
     let allInput = 0, allOutput = 0, allRequests = 0;
-    let bizInput = 0, bizOutput = 0, bizRequests = 0, bizDays = 0;
+    let bizInput = 0, bizOutput = 0, bizRequests = 0;
+    let totalDays = 0, bizDays = 0;
 
     for (const d of data) {
       allInput += d.inputTokens;
       allOutput += d.outputTokens;
       allRequests += d.requests;
+      totalDays++;
 
       const dow = new Date(d.date).getDay();
       if (dow !== 0 && dow !== 6 && !holidaySet.has(d.date)) {
@@ -132,7 +147,7 @@ adminStatsRoutes.get('/daily', async (req: AuthenticatedRequest, res: Response) 
       }
     }
 
-    const totalDays = data.length || 1;
+    const tDays = totalDays || 1;
     const bDays = bizDays || 1;
 
     res.json({
@@ -140,9 +155,9 @@ adminStatsRoutes.get('/daily', async (req: AuthenticatedRequest, res: Response) 
       days,
       averages: {
         all: {
-          avgInputTokens: Math.round(allInput / totalDays),
-          avgOutputTokens: Math.round(allOutput / totalDays),
-          avgRequests: Math.round(allRequests / totalDays),
+          avgInputTokens: Math.round(allInput / tDays),
+          avgOutputTokens: Math.round(allOutput / tDays),
+          avgRequests: Math.round(allRequests / tDays),
           days: totalDays,
         },
         businessDays: {
@@ -361,10 +376,39 @@ adminStatsRoutes.get('/daily-active-users', async (req: AuthenticatedRequest, re
       `;
     }
 
-    const data = distinctDau.map(row => ({
-      date: new Date(row.date).toISOString().split('T')[0],
+    const rawData = distinctDau.map(row => ({
+      date: toDateString(new Date(row.date)),
       activeUsers: Number(row.dau),
     }));
+
+    // Fill date gaps with zeros
+    const dauMap = new Map(rawData.map(d => [d.date, d]));
+    const data: typeof rawData = [];
+    const cursor = new Date(since);
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    let holidaySet: Set<string> | null = null;
+    if (excludeHolidays) {
+      const hols = await prisma.holiday.findMany({
+        where: { date: { gte: since } },
+        select: { date: true },
+      });
+      holidaySet = new Set(hols.map(h => toDateString(h.date)));
+    }
+
+    while (cursor <= today) {
+      const dateStr = toDateString(cursor);
+      const dow = cursor.getDay();
+
+      if (excludeHolidays && (dow === 0 || dow === 6 || holidaySet?.has(dateStr))) {
+        cursor.setDate(cursor.getDate() + 1);
+        continue;
+      }
+
+      data.push(dauMap.get(dateStr) || { date: dateStr, activeUsers: 0 });
+      cursor.setDate(cursor.getDate() + 1);
+    }
 
     res.json({ data, days, excludeHolidays });
   } catch (error) {
@@ -392,7 +436,7 @@ adminStatsRoutes.get('/cumulative-users', async (req: AuthenticatedRequest, res:
     `;
 
     const data = cumulativeData.map(row => ({
-      date: new Date(row.date).toISOString().split('T')[0],
+      date: toDateString(new Date(row.date)),
       totalUsers: Number(row.cumulative_users),
     }));
 
@@ -431,7 +475,7 @@ adminStatsRoutes.get('/model-daily-trend', async (req: AuthenticatedRequest, res
     const modelMap = new Map(models.map(m => [m.id, m]));
 
     const data = trendData.map(row => ({
-      date: row.date.toISOString().split('T')[0],
+      date: toDateString(row.date),
       modelId: row.modelId,
       modelName: modelMap.get(row.modelId)?.displayName || modelMap.get(row.modelId)?.name || 'Unknown',
       requests: row._sum.requestCount || 0,
@@ -549,7 +593,7 @@ adminStatsRoutes.get('/latency/history', async (req: AuthenticatedRequest, res: 
     const modelMap = new Map(models.map(m => [m.id, m]));
 
     const data = latencyHistory.map(row => ({
-      hour: row.hour.toISOString(),
+      hour: toDateTimeString(row.hour),
       modelId: row.model_id,
       modelName: modelMap.get(row.model_id)?.displayName || modelMap.get(row.model_id)?.name || 'Unknown',
       avgLatencyMs: Math.round(row.avg_latency),

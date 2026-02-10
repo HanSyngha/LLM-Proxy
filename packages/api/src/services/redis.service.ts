@@ -1,4 +1,5 @@
 import { Redis } from 'ioredis';
+import { todayString } from '../utils/date.js';
 
 export function createRedisClient(): Redis {
   const redisUrl = process.env['REDIS_URL'] || 'redis://localhost:6379';
@@ -31,7 +32,7 @@ export async function getTodayUsage(redis: Redis): Promise<{
   inputTokens: number;
   outputTokens: number;
 }> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayString();
   const data = await redis.hgetall(`daily_usage:${today}`);
   return {
     requests: parseInt(data['requests'] || '0', 10),
@@ -48,7 +49,7 @@ export async function incrementUsage(
   inputTokens: number,
   outputTokens: number
 ): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayString();
   const dailyKey = `daily_usage:${today}`;
   const userKey = `user_usage:${userId}:${today}`;
   const modelKey = `model_usage:${modelId}:${today}`;

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { TokenAuthenticatedRequest } from './tokenAuth.js';
 import { redis, prisma } from '../index.js';
+import { todayString, toHourString, toMinuteString } from '../utils/date.js';
 
 let cachedDefaults: { rpmLimit: number; tpmLimit: number; tphLimit: number; tpdLimit: number } | null = null;
 let defaultsCachedAt = 0;
@@ -56,7 +57,7 @@ export async function checkRateLimit(req: TokenAuthenticatedRequest, res: Respon
 
     // TPD check (tokens per day) - pre-check with current counts
     const tpdLimit = req.apiToken.tpdLimit ?? defaults.tpdLimit;
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayString();
     const tpdKey = `token_usage:${tokenId}:${today}`;
     const todayData = await redis.hgetall(tpdKey);
     const todayOutputTokens = parseInt(todayData['outputTokens'] || '0', 10);
@@ -75,7 +76,7 @@ export async function checkRateLimit(req: TokenAuthenticatedRequest, res: Respon
 
     // TPH check (tokens per hour)
     const tphLimit = req.apiToken.tphLimit ?? defaults.tphLimit;
-    const currentHour = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH
+    const currentHour = toHourString(new Date());
     const tphKey = `rl:tph:${tokenId}:${currentHour}`;
     const currentTph = parseInt(await redis.get(tphKey) || '0', 10);
 
@@ -93,7 +94,7 @@ export async function checkRateLimit(req: TokenAuthenticatedRequest, res: Respon
 
     // TPM check (tokens per minute)
     const tpmLimit = req.apiToken.tpmLimit ?? defaults.tpmLimit;
-    const currentMinute = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+    const currentMinute = toMinuteString(new Date());
     const tpmKey = `rl:tpm:${tokenId}:${currentMinute}`;
     const currentTpm = parseInt(await redis.get(tpmKey) || '0', 10);
 
@@ -125,13 +126,13 @@ export async function recordTokenRateLimit(tokenId: string, outputTokens: number
 
   try {
     // TPM counter
-    const currentMinute = new Date().toISOString().slice(0, 16);
+    const currentMinute = toMinuteString(new Date());
     const tpmKey = `rl:tpm:${tokenId}:${currentMinute}`;
     await redis.incrby(tpmKey, outputTokens);
     await redis.expire(tpmKey, 120); // 2 min TTL
 
     // TPH counter
-    const currentHour = new Date().toISOString().slice(0, 13);
+    const currentHour = toHourString(new Date());
     const tphKey = `rl:tph:${tokenId}:${currentHour}`;
     await redis.incrby(tphKey, outputTokens);
     await redis.expire(tphKey, 7200); // 2 hour TTL

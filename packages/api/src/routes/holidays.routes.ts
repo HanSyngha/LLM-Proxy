@@ -15,6 +15,7 @@ import { Router, RequestHandler } from 'express';
 import { prisma } from '../index.js';
 import { authenticateToken, requireAdmin, requireSuperAdmin, AuthenticatedRequest } from '../middleware/dashboardAuth.js';
 import { z } from 'zod';
+import { toDateString } from '../utils/date.js';
 
 export const holidaysRoutes = Router();
 
@@ -94,7 +95,7 @@ holidaysRoutes.get('/dates', authenticateToken, async (req: AuthenticatedRequest
 
     const dates = holidays.map(h => {
       const d = new Date(h.date);
-      return d.toISOString().split('T')[0];
+      return toDateString(d);
     });
 
     res.json({ dates });
@@ -151,7 +152,7 @@ holidaysRoutes.post(
       }
 
       const { date, name, type } = parsed.data;
-      const dateObj = new Date(date + 'T00:00:00.000Z');
+      const dateObj = new Date(date + 'T00:00:00');
 
       const existing = await prisma.holiday.findUnique({
         where: { date: dateObj },
@@ -195,7 +196,7 @@ holidaysRoutes.post(
       };
 
       for (const holidayData of holidays) {
-        const dateObj = new Date(holidayData.date + 'T00:00:00.000Z');
+        const dateObj = new Date(holidayData.date + 'T00:00:00');
 
         try {
           const existing = await prisma.holiday.findUnique({

@@ -143,7 +143,52 @@ export default function AdminDashboard() {
     refetchInterval: 30_000,
   });
 
-  const isLoading = loadingOverview || loadingDaily || loadingUsers || loadingModels || loadingDepts || loadingDau;
+  const isLoading = loadingOverview || loadingDaily || loadingUsers || loadingModels || loadingDepts || loadingDau || loadingLatency || loadingLatencyHistory;
+
+  // All hooks must be called before any early return (React rules of hooks)
+  const stats = overview;
+  const bizAvg = dailyData?.averages?.businessDays;
+  const avgDailyTokens = bizAvg
+    ? formatNumber(Math.round((bizAvg.avgInputTokens ?? 0) + (bizAvg.avgOutputTokens ?? 0)))
+    : '-';
+
+  const latencyModels: Array<{ modelName: string; avgLatencyMs: number; p50LatencyMs: number | null; p95LatencyMs: number | null; requestCount: number }> = latencyData?.data ?? [];
+  const avgLatency = latencyModels.length > 0
+    ? Math.round(latencyModels.reduce((sum, m) => sum + m.avgLatencyMs * m.requestCount, 0) / latencyModels.reduce((sum, m) => sum + m.requestCount, 0))
+    : null;
+
+  const modelChartData = (modelData?.data ?? []).map((m: { model?: { displayName?: string; name?: string }; outputTokens: number; inputTokens: number; requests: number }) => ({
+    ...m,
+    modelName: m.model?.displayName || m.model?.name || 'Unknown',
+  }));
+
+  const cumulativeDailyData = useMemo(() => {
+    const data = dailyData?.data ?? [];
+    let cumInput = 0, cumOutput = 0;
+    return data.map((d: { date: string; inputTokens: number; outputTokens: number }) => {
+      cumInput += d.inputTokens;
+      cumOutput += d.outputTokens;
+      return { date: d.date, cumInputTokens: cumInput, cumOutputTokens: cumOutput };
+    });
+  }, [dailyData]);
+
+  const deptChartData = deptData?.data ?? [];
+
+  const cumulativeDeptData = useMemo(() => {
+    const data = deptChartData as Array<{ deptname: string; inputTokens: number; outputTokens: number }>;
+    let cumTotal = 0;
+    const totalAll = data.reduce((sum, d) => sum + d.inputTokens + d.outputTokens, 0);
+    return data.map(d => {
+      cumTotal += d.inputTokens + d.outputTokens;
+      return { ...d, cumulativePct: totalAll > 0 ? Math.round(cumTotal / totalAll * 100) : 0 };
+    });
+  }, [deptChartData]);
+
+  const topUsersData = (topUsers?.data ?? []).map((u: { user?: { loginid?: string; username?: string }; requests: number; inputTokens: number; outputTokens: number }) => ({
+    ...u,
+    loginid: u.user?.loginid || 'Unknown',
+    username: u.user?.username || 'Unknown',
+  }));
 
   if (overviewError) {
     return (
@@ -164,58 +209,6 @@ export default function AdminDashboard() {
   if (isLoading && !overview) {
     return <LoadingSkeleton />;
   }
-
-  const stats = overview;
-
-  // Business day averages from daily data
-  const bizAvg = dailyData?.averages?.businessDays;
-  const avgDailyTokens = bizAvg
-    ? formatNumber(Math.round((bizAvg.avgInputTokens ?? 0) + (bizAvg.avgOutputTokens ?? 0)))
-    : '-';
-
-  // Average latency from latency data
-  const latencyModels: Array<{ modelName: string; avgLatencyMs: number; p50LatencyMs: number | null; p95LatencyMs: number | null; requestCount: number }> = latencyData?.data ?? [];
-  const avgLatency = latencyModels.length > 0
-    ? Math.round(latencyModels.reduce((sum, m) => sum + m.avgLatencyMs * m.requestCount, 0) / latencyModels.reduce((sum, m) => sum + m.requestCount, 0))
-    : null;
-
-  // Prepare model chart data with flat modelName field
-  const modelChartData = (modelData?.data ?? []).map((m: { model?: { displayName?: string; name?: string }; outputTokens: number; inputTokens: number; requests: number }) => ({
-    ...m,
-    modelName: m.model?.displayName || m.model?.name || 'Unknown',
-  }));
-
-  // Cumulative daily data
-  const cumulativeDailyData = useMemo(() => {
-    const data = dailyData?.data ?? [];
-    let cumInput = 0, cumOutput = 0;
-    return data.map((d: { date: string; inputTokens: number; outputTokens: number }) => {
-      cumInput += d.inputTokens;
-      cumOutput += d.outputTokens;
-      return { date: d.date, cumInputTokens: cumInput, cumOutputTokens: cumOutput };
-    });
-  }, [dailyData]);
-
-  // Prepare dept chart data
-  const deptChartData = deptData?.data ?? [];
-
-  // Cumulative dept data (Pareto: stacked bar + cumulative %)
-  const cumulativeDeptData = useMemo(() => {
-    const data = deptChartData as Array<{ deptname: string; inputTokens: number; outputTokens: number }>;
-    let cumTotal = 0;
-    const totalAll = data.reduce((sum, d) => sum + d.inputTokens + d.outputTokens, 0);
-    return data.map(d => {
-      cumTotal += d.inputTokens + d.outputTokens;
-      return { ...d, cumulativePct: totalAll > 0 ? Math.round(cumTotal / totalAll * 100) : 0 };
-    });
-  }, [deptChartData]);
-
-  // Prepare top users data with flat loginid/username
-  const topUsersData = (topUsers?.data ?? []).map((u: { user?: { loginid?: string; username?: string }; requests: number; inputTokens: number; outputTokens: number }) => ({
-    ...u,
-    loginid: u.user?.loginid || 'Unknown',
-    username: u.user?.username || 'Unknown',
-  }));
 
   return (
     <div className="space-y-6">

@@ -14,6 +14,7 @@ import { Router } from 'express';
 import { prisma, redis } from '../index.js';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/dashboardAuth.js';
 import { getMonthlyOutputTokens } from '../services/redis.service.js';
+import { toDateString } from '../utils/date.js';
 
 export const myUsageRoutes = Router();
 
@@ -171,8 +172,8 @@ myUsageRoutes.get('/daily', async (req: AuthenticatedRequest, res) => {
 
     const stats = dailyStats.map(row => ({
       date: row.date instanceof Date
-        ? row.date.toISOString().split('T')[0]
-        : String(row.date).split('T')[0],
+        ? toDateString(row.date)
+        : toDateString(new Date(String(row.date))),
       requests: Number(row.requests),
       inputTokens: Number(row.input_tokens),
       outputTokens: Number(row.output_tokens),
