@@ -65,17 +65,17 @@ services:
     environment:
       <<: *proxy-env
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-llmgateway}:${POSTGRES_PASSWORD:-llmgateway123}@postgres:5432/${POSTGRES_DB:-llmgateway}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-llmgateway}:${POSTGRES_PASSWORD:-llmgateway123}@postgres:5432/${POSTGRES_DB:-llmgateway}?connection_limit=20&pool_timeout=30
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-your-jwt-secret-change-in-production}
       SSO_CERT_PATH: /app/cert/cert.cer
       DEVELOPERS: ${DEVELOPERS:-syngha.han}
       PROXY_PORT: 3000
       DASHBOARD_PORT: 3001
-      DEFAULT_RPM: ${DEFAULT_RPM:-60}
-      DEFAULT_TPM: ${DEFAULT_TPM:-100000}
-      DEFAULT_TPH: ${DEFAULT_TPH:-1000000}
-      DEFAULT_TPD: ${DEFAULT_TPD:-10000000}
+      DEFAULT_RPM: ${DEFAULT_RPM:-0}
+      DEFAULT_TPM: ${DEFAULT_TPM:-0}
+      DEFAULT_TPH: ${DEFAULT_TPH:-0}
+      DEFAULT_TPD: ${DEFAULT_TPD:-0}
       REQUEST_LOG_RETENTION_DAYS: ${REQUEST_LOG_RETENTION_DAYS:-30}
     volumes:
       - ./cert:/app/cert:ro

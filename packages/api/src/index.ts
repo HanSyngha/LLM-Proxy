@@ -122,13 +122,13 @@ async function ensureDefaultRateLimits() {
     await prisma.rateLimitConfig.create({
       data: {
         key: 'default',
-        rpmLimit: parseInt(process.env['DEFAULT_RPM'] || '60'),
-        tpmLimit: parseInt(process.env['DEFAULT_TPM'] || '100000'),
-        tphLimit: parseInt(process.env['DEFAULT_TPH'] || '1000000'),
-        tpdLimit: parseInt(process.env['DEFAULT_TPD'] || '10000000'),
+        rpmLimit: parseInt(process.env['DEFAULT_RPM'] || '0'),
+        tpmLimit: parseInt(process.env['DEFAULT_TPM'] || '0'),
+        tphLimit: parseInt(process.env['DEFAULT_TPH'] || '0'),
+        tpdLimit: parseInt(process.env['DEFAULT_TPD'] || '0'),
       },
     });
-    console.log('[RateLimit] Default rate limits created');
+    console.log('[RateLimit] Default rate limits created (0 = unlimited)');
   }
 }
 
@@ -153,13 +153,19 @@ async function main() {
 
     await ensureDefaultRateLimits();
 
-    proxyApp.listen(PROXY_PORT, () => {
+    const proxyServer = proxyApp.listen(PROXY_PORT, () => {
       console.log(`LLM Proxy API running on port ${PROXY_PORT}`);
     });
+    // High-concurrency tuning: increase backlog and keep-alive timeout
+    proxyServer.maxConnections = 0; // unlimited
+    proxyServer.keepAliveTimeout = 65000; // slightly longer than nginx keepalive_timeout (60s)
+    proxyServer.headersTimeout = 66000; // must be > keepAliveTimeout
 
-    dashboardApp.listen(DASHBOARD_PORT, () => {
+    const dashboardServer = dashboardApp.listen(DASHBOARD_PORT, () => {
       console.log(`Dashboard API running on port ${DASHBOARD_PORT}`);
     });
+    dashboardServer.keepAliveTimeout = 65000;
+    dashboardServer.headersTimeout = 66000;
 
     // Start LLM Test Scheduler
     startLLMTestScheduler();
