@@ -1,11 +1,15 @@
 /**
  * LLM Gateway API Server
  *
- * Dual-port Express server:
- * - Port 3000: LLM Proxy (API Token auth)
- * - Port 3001: Dashboard API (SSO/JWT auth)
+ * Cluster-mode dual-port Express server:
+ * - Master: forks workers, monitors and auto-restarts on crash
+ * - Workers: each runs Express on shared ports
+ *   - Port 3000: LLM Proxy (API Token auth)
+ *   - Port 3001: Dashboard API (SSO/JWT auth)
  */
 
+import cluster from 'node:cluster';
+import os from 'node:os';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -27,152 +31,193 @@ import 'dotenv/config';
 
 const PROXY_PORT = process.env['PROXY_PORT'] || 3000;
 const DASHBOARD_PORT = process.env['DASHBOARD_PORT'] || 3001;
+const NUM_WORKERS = Math.max(2, Math.min(os.cpus().length, 8)); // 2~8 workers
 
-// Initialize Prisma
+// ============================================
+// Shared instances (created per-worker, exported for routes)
+// ============================================
 export const prisma = new PrismaClient();
-
-// Initialize Redis
 export const redis = createRedisClient();
 
 // ============================================
-// Proxy App (Port 3000) - API Token auth
+// Cluster Master
 // ============================================
-const proxyApp = express();
-proxyApp.set('trust proxy', 1);
-proxyApp.use(helmet());
-proxyApp.use(cors());
-proxyApp.use(express.json({ limit: '50mb' }));
-proxyApp.use(requestLogger);
-proxyApp.use(morgan('combined'));
+if (cluster.isPrimary) {
+  console.log(`[Master] PID ${process.pid} starting ${NUM_WORKERS} workers...`);
 
-proxyApp.get('/health', async (_req, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    await redis.ping();
-    res.json({ status: 'healthy', timestamp: new Date().toISOString() });
-  } catch {
-    res.status(503).json({ status: 'unhealthy', timestamp: new Date().toISOString() });
+  for (let i = 0; i < NUM_WORKERS; i++) {
+    cluster.fork();
   }
-});
 
-proxyApp.use('/v1', proxyRoutes);
-
-proxyApp.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('Proxy error:', err);
-  res.status(500).json({
-    error: { type: 'server_error', message: 'Internal server error' },
+  cluster.on('exit', (worker, code, signal) => {
+    console.error(`[Master] Worker ${worker.process.pid} died (code=${code}, signal=${signal}). Restarting in 1s...`);
+    setTimeout(() => cluster.fork(), 1000);
   });
-});
 
-proxyApp.use((_req, res) => {
-  res.status(404).json({ error: 'Not found. Use /v1/ endpoints.' });
-});
+  const shutdownMaster = () => {
+    console.log('[Master] Shutting down all workers...');
+    for (const id in cluster.workers) {
+      cluster.workers[id]?.process.kill('SIGTERM');
+    }
+    setTimeout(() => process.exit(0), 5000);
+  };
+  process.on('SIGTERM', shutdownMaster);
+  process.on('SIGINT', shutdownMaster);
 
-// ============================================
-// Dashboard App (Port 3001) - SSO/JWT auth
-// ============================================
-const dashboardApp = express();
-dashboardApp.set('trust proxy', 1);
-dashboardApp.use(helmet());
-dashboardApp.use(cors({
-  origin: process.env['CORS_ORIGIN'] || true,
-  credentials: true,
-}));
-dashboardApp.use(express.json({ limit: '10mb' }));
-dashboardApp.use(requestLogger);
-dashboardApp.use(morgan('combined'));
+} else {
+  // ============================================
+  // Cluster Worker
+  // ============================================
 
-dashboardApp.get('/health', async (_req, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    await redis.ping();
-    res.json({ status: 'healthy', timestamp: new Date().toISOString() });
-  } catch {
-    res.status(503).json({ status: 'unhealthy', timestamp: new Date().toISOString() });
-  }
-});
-
-// Dashboard routes
-dashboardApp.use('/auth', authRoutes);
-dashboardApp.use('/tokens', tokenRoutes);
-dashboardApp.use('/my-usage', myUsageRoutes);
-dashboardApp.use('/models', modelsRoutes);
-dashboardApp.use('/admin', adminRoutes);
-dashboardApp.use('/holidays', holidaysRoutes);
-dashboardApp.use('/llm-test', llmTestRoutes);
-
-dashboardApp.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('Error:', err);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env['NODE_ENV'] === 'development' ? err.message : undefined,
+  // Crash protection
+  process.on('uncaughtException', (err) => {
+    console.error(`[Worker ${process.pid}] Uncaught exception:`, err);
+    // Gracefully exit so master restarts a fresh worker
+    setTimeout(() => process.exit(1), 3000);
   });
-});
+  process.on('unhandledRejection', (reason) => {
+    console.error(`[Worker ${process.pid}] Unhandled rejection:`, reason);
+    // Log but don't crash - most rejections are non-fatal
+  });
 
-dashboardApp.use((_req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
+  // ============================================
+  // Proxy App (Port 3000) - API Token auth
+  // ============================================
+  const proxyApp = express();
+  proxyApp.set('trust proxy', 1);
+  proxyApp.use(helmet());
+  proxyApp.use(cors());
+  proxyApp.use(express.json({ limit: '50mb' }));
+  proxyApp.use(requestLogger);
+  proxyApp.use(morgan('combined'));
 
-// ============================================
-// Startup
-// ============================================
-async function ensureDefaultRateLimits() {
-  const existing = await prisma.rateLimitConfig.findUnique({ where: { key: 'default' } });
-  if (!existing) {
-    await prisma.rateLimitConfig.create({
-      data: {
-        key: 'default',
-        rpmLimit: parseInt(process.env['DEFAULT_RPM'] || '0'),
-        tpmLimit: parseInt(process.env['DEFAULT_TPM'] || '0'),
-        tphLimit: parseInt(process.env['DEFAULT_TPH'] || '0'),
-        tpdLimit: parseInt(process.env['DEFAULT_TPD'] || '0'),
-      },
-    });
-    console.log('[RateLimit] Default rate limits created (0 = unlimited)');
+  proxyApp.get('/health', async (_req, res) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      await redis.ping();
+      res.json({ status: 'healthy', timestamp: new Date().toISOString(), worker: process.pid });
+    } catch {
+      res.status(503).json({ status: 'unhealthy', timestamp: new Date().toISOString() });
+    }
+  });
+
+  proxyApp.use('/v1', proxyRoutes);
+
+  proxyApp.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('Proxy error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: { type: 'server_error', message: 'Internal server error' },
+      });
+    }
+  });
+
+  proxyApp.use((_req, res) => {
+    res.status(404).json({ error: 'Not found. Use /v1/ endpoints.' });
+  });
+
+  // ============================================
+  // Dashboard App (Port 3001) - SSO/JWT auth
+  // ============================================
+  const dashboardApp = express();
+  dashboardApp.set('trust proxy', 1);
+  dashboardApp.use(helmet());
+  dashboardApp.use(cors({
+    origin: process.env['CORS_ORIGIN'] || true,
+    credentials: true,
+  }));
+  dashboardApp.use(express.json({ limit: '10mb' }));
+  dashboardApp.use(requestLogger);
+  dashboardApp.use(morgan('combined'));
+
+  dashboardApp.get('/health', async (_req, res) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      await redis.ping();
+      res.json({ status: 'healthy', timestamp: new Date().toISOString(), worker: process.pid });
+    } catch {
+      res.status(503).json({ status: 'unhealthy', timestamp: new Date().toISOString() });
+    }
+  });
+
+  dashboardApp.use('/auth', authRoutes);
+  dashboardApp.use('/tokens', tokenRoutes);
+  dashboardApp.use('/my-usage', myUsageRoutes);
+  dashboardApp.use('/models', modelsRoutes);
+  dashboardApp.use('/admin', adminRoutes);
+  dashboardApp.use('/holidays', holidaysRoutes);
+  dashboardApp.use('/llm-test', llmTestRoutes);
+
+  dashboardApp.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('Error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Internal server error',
+        message: process.env['NODE_ENV'] === 'development' ? err.message : undefined,
+      });
+    }
+  });
+
+  dashboardApp.use((_req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
+
+  // ============================================
+  // Worker Startup
+  // ============================================
+  async function ensureDefaultRateLimits() {
+    const existing = await prisma.rateLimitConfig.findUnique({ where: { key: 'default' } });
+    if (!existing) {
+      await prisma.rateLimitConfig.create({
+        data: {
+          key: 'default',
+          rpmLimit: parseInt(process.env['DEFAULT_RPM'] || '0'),
+          tpmLimit: parseInt(process.env['DEFAULT_TPM'] || '0'),
+          tphLimit: parseInt(process.env['DEFAULT_TPH'] || '0'),
+          tpdLimit: parseInt(process.env['DEFAULT_TPD'] || '0'),
+        },
+      });
+      console.log(`[Worker ${process.pid}] Default rate limits created (0 = unlimited)`);
+    }
   }
-}
 
-async function shutdown() {
-  console.log('Shutting down gracefully...');
-  stopLLMTestScheduler();
-  await prisma.$disconnect();
-  await redis.quit();
-  process.exit(0);
-}
+  async function shutdown() {
+    console.log(`[Worker ${process.pid}] Shutting down...`);
+    stopLLMTestScheduler();
+    await prisma.$disconnect();
+    await redis.quit();
+    process.exit(0);
+  }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 
-async function main() {
   try {
     await prisma.$connect();
-    console.log('Database connected');
+    console.log(`[Worker ${process.pid}] Database connected`);
 
     await redis.ping();
-    console.log('Redis connected');
+    console.log(`[Worker ${process.pid}] Redis connected`);
 
-    await ensureDefaultRateLimits();
+    // Only first worker initializes defaults and scheduler
+    if (cluster.worker?.id === 1) {
+      await ensureDefaultRateLimits();
+      startLLMTestScheduler();
+    }
 
     const proxyServer = proxyApp.listen(PROXY_PORT, () => {
-      console.log(`LLM Proxy API running on port ${PROXY_PORT}`);
+      console.log(`[Worker ${process.pid}] LLM Proxy API on port ${PROXY_PORT}`);
     });
-    // High-concurrency tuning: increase backlog and keep-alive timeout
-    proxyServer.maxConnections = 0; // unlimited
-    proxyServer.keepAliveTimeout = 65000; // slightly longer than nginx keepalive_timeout (60s)
-    proxyServer.headersTimeout = 66000; // must be > keepAliveTimeout
+    proxyServer.keepAliveTimeout = 65000;
+    proxyServer.headersTimeout = 66000;
 
     const dashboardServer = dashboardApp.listen(DASHBOARD_PORT, () => {
-      console.log(`Dashboard API running on port ${DASHBOARD_PORT}`);
+      console.log(`[Worker ${process.pid}] Dashboard API on port ${DASHBOARD_PORT}`);
     });
     dashboardServer.keepAliveTimeout = 65000;
     dashboardServer.headersTimeout = 66000;
-
-    // Start LLM Test Scheduler
-    startLLMTestScheduler();
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error(`[Worker ${process.pid}] Failed to start:`, error);
     process.exit(1);
   }
 }
-
-main();
