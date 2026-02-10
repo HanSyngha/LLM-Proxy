@@ -216,6 +216,26 @@ adminTokensRoutes.patch('/:id', requireWriteAccess, async (req: AuthenticatedReq
       }
     }
 
+    // Validate monthlyOutputTokenBudget: null or non-negative number
+    if (monthlyOutputTokenBudget !== undefined && monthlyOutputTokenBudget !== null) {
+      if (typeof monthlyOutputTokenBudget !== 'number' || monthlyOutputTokenBudget < 0) {
+        res.status(400).json({ error: 'monthlyOutputTokenBudget must be a non-negative number or null' });
+        return;
+      }
+    }
+
+    // Validate enabled: must be boolean
+    if (enabled !== undefined && typeof enabled !== 'boolean') {
+      res.status(400).json({ error: 'enabled must be a boolean' });
+      return;
+    }
+
+    // Validate allowedModels: must be array of strings
+    if (allowedModels !== undefined && (!Array.isArray(allowedModels) || !allowedModels.every(m => typeof m === 'string'))) {
+      res.status(400).json({ error: 'allowedModels must be an array of strings' });
+      return;
+    }
+
     const existing = await prisma.apiToken.findUnique({
       where: { id },
       include: { user: { select: { loginid: true } } },
