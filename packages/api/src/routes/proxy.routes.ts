@@ -124,6 +124,25 @@ function buildEmbeddingsUrl(endpointUrl: string): string {
 }
 
 /**
+ * Build the /rerank URL from an endpoint base URL.
+ * vLLM serves rerank at /v1/rerank (Jina-compatible) and /v2/rerank (Cohere-compatible).
+ * We use /v1/rerank (Jina format) by default.
+ */
+function buildRerankUrl(endpointUrl: string): string {
+  let url = endpointUrl.trim();
+  if (url.endsWith('/rerank')) return url;
+  if (url.endsWith('/')) url = url.slice(0, -1);
+  if (url.endsWith('/v1')) return `${url}/rerank`;
+  // Strip known suffixes
+  if (url.endsWith('/chat/completions')) {
+    url = url.replace(/\/chat\/completions$/, '');
+  } else if (url.endsWith('/embeddings')) {
+    url = url.replace(/\/embeddings$/, '');
+  }
+  return `${url}/rerank`;
+}
+
+/**
  * Check if the error is a max_tokens "must be at least" error.
  */
 function isMaxTokensError(errorText: string): boolean {
@@ -1142,6 +1161,292 @@ proxyRoutes.post('/embeddings', authenticateApiToken, checkRateLimit, async (req
       resolvedModel: null,
       method: 'POST',
       path: '/v1/embeddings',
+      statusCode: 500,
+      requestBody: req.body,
+      responseBody: null,
+      inputTokens: null,
+      outputTokens: null,
+      latencyMs,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      userAgent: req.headers['user-agent'] || null,
+      ipAddress: req.ip || null,
+      stream: false,
+    }).catch(() => {});
+  }
+});
+
+/**
+ * POST /v1/rerank
+ * Proxy rerank request to actual LLM (vLLM Jina-compatible format).
+ *
+ * Request body:
+ *   model (required) - model name/alias
+ *   query (required) - search query string
+ *   documents (required) - array of document strings or { text: string } objects
+ *   top_n (optional) - max results to return
+ *   return_documents (optional) - include document text in response (default false)
+ *
+ * Response:
+ *   { id, model, results: [{ index, relevance_score, document? }], usage }
+ */
+proxyRoutes.post('/rerank', authenticateApiToken, checkRateLimit, async (req: TokenAuthenticatedRequest, res: Response) => {
+  const startTime = Date.now();
+
+  try {
+    const { model: modelName, query, documents, top_n, return_documents, ...otherParams } = req.body;
+
+    // ---- Input validation ----
+    if (!modelName) {
+      res.status(400).json({ error: { type: 'invalid_request_error', message: 'model is required' } });
+      return;
+    }
+    if (!query || typeof query !== 'string') {
+      res.status(400).json({ error: { type: 'invalid_request_error', message: 'query is required and must be a string' } });
+      return;
+    }
+    if (!documents || !Array.isArray(documents) || documents.length === 0) {
+      res.status(400).json({ error: { type: 'invalid_request_error', message: 'documents is required and must be a non-empty array' } });
+      return;
+    }
+    if (top_n !== undefined && (typeof top_n !== 'number' || !Number.isInteger(top_n) || top_n < 1)) {
+      res.status(400).json({ error: { type: 'invalid_request_error', message: 'top_n must be a positive integer' } });
+      return;
+    }
+
+    // ---- Resolve model ----
+    const model = await resolveModel(modelName);
+    if (!model) {
+      res.status(404).json({ error: { type: 'not_found', message: `Model '${modelName}' not found or disabled` } });
+      return;
+    }
+
+    // ---- Check allowedModels ----
+    if (req.apiToken?.allowedModels?.length && req.apiToken.allowedModels.length > 0 && !req.apiToken.allowedModels.includes(model.id)) {
+      res.status(403).json({
+        error: { type: 'permission_error', message: `Your API key does not have access to model '${modelName}'` },
+      });
+      return;
+    }
+
+    // ---- Budget check ----
+    const budgetCheck = await checkBudget(req.userId!, req.apiTokenId || null, req.user?.deptname);
+    if (!budgetCheck.allowed) {
+      res.status(429).json({
+        error: { type: 'budget_exceeded', message: budgetCheck.reason },
+      });
+      return;
+    }
+
+    // ---- Get endpoints with failover ----
+    const parentEndpoint: EndpointInfo = {
+      endpointUrl: model.endpointUrl,
+      apiKey: model.apiKey,
+      modelName: model.upstreamModelName || model.name,
+      extraHeaders: model.extraHeaders as Record<string, string> | null,
+    };
+
+    const endpoints = await getModelEndpoints(model.id, parentEndpoint);
+    const startIdx = await getRoundRobinIndex(model.id, endpoints.length);
+    let lastError: string | null = null;
+
+    for (let attempt = 0; attempt < endpoints.length; attempt++) {
+      const idx = (startIdx + attempt) % endpoints.length;
+      const endpoint = endpoints[idx]!;
+
+      // Circuit breaker check
+      if (!await isEndpointAvailable(endpoint.endpointUrl)) {
+        console.log(`[CircuitBreaker] Skipping ${endpoint.endpointUrl}`);
+        continue;
+      }
+
+      if (attempt > 0) {
+        console.log(`[Failover] Rerank model "${model.name}" trying endpoint ${attempt + 1}/${endpoints.length}: ${endpoint.endpointUrl}`);
+      }
+
+      const url = buildRerankUrl(endpoint.endpointUrl);
+      console.log(`[Proxy] user=${req.user?.loginid || 'unknown'} token=${req.apiTokenId || 'none'} model=${model.name} endpoint=${url} (rerank)`);
+
+      const rerankBody: Record<string, unknown> = {
+        model: endpoint.modelName,
+        query,
+        documents,
+      };
+      if (top_n !== undefined) rerankBody.top_n = top_n;
+      if (return_documents !== undefined) rerankBody.return_documents = return_documents;
+      // Pass through any extra params the client sent
+      for (const [key, value] of Object.entries(otherParams)) {
+        if (!(key in rerankBody)) rerankBody[key] = value;
+      }
+
+      const headers = buildHeaders(endpoint);
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(rerankBody),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+        const latencyMs = Date.now() - startTime;
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(
+            `[LLM-Error] Rerank\n` +
+            `  User: ${req.user?.loginid || 'unknown'}\n` +
+            `  Token: ${req.apiTokenId || 'none'}\n` +
+            `  Model: ${modelName}\n` +
+            `  URL: ${url}\n` +
+            `  Status: ${response.status}\n` +
+            `  Error: ${errorText.substring(0, 2000)}`
+          );
+
+          // 4xx -> pass through, no failover
+          if (response.status >= 400 && response.status < 500) {
+            try {
+              const errorJson = JSON.parse(errorText);
+              res.status(response.status).json(errorJson);
+            } catch {
+              res.status(response.status).send(errorText);
+            }
+
+            logRequest({
+              apiTokenId: req.apiTokenId || null,
+              userId: req.userId || null,
+              modelName,
+              resolvedModel: model.name,
+              method: 'POST',
+              path: '/v1/rerank',
+              statusCode: response.status,
+              requestBody: req.body,
+              responseBody: null,
+              inputTokens: null,
+              outputTokens: null,
+              latencyMs,
+              errorMessage: errorText,
+              userAgent: req.headers['user-agent'] || null,
+              ipAddress: req.ip || null,
+              stream: false,
+            }).catch(() => {});
+
+            await recordEndpointSuccess(endpoint.endpointUrl);
+            return;
+          }
+
+          // 5xx -> failover
+          console.error(`[Failover] Rerank endpoint ${url} returned ${response.status}, will try next`);
+          await recordEndpointFailure(endpoint.endpointUrl);
+          lastError = errorText;
+          continue;
+        }
+
+        // ---- Success ----
+        const data = await response.json() as {
+          usage?: { total_tokens?: number; prompt_tokens?: number };
+          [key: string]: unknown;
+        };
+
+        await recordEndpointSuccess(endpoint.endpointUrl);
+
+        const inputTokens = data.usage?.prompt_tokens || data.usage?.total_tokens || 0;
+
+        // Record usage (rerank has no output tokens)
+        if (inputTokens > 0) {
+          recordUsage({
+            userId: req.userId!,
+            loginid: req.user?.loginid || 'unknown',
+            modelId: model.id,
+            apiTokenId: req.apiTokenId || null,
+            inputTokens,
+            outputTokens: 0,
+            latencyMs,
+            deptname: req.user?.deptname || '',
+            businessUnit: req.user?.businessUnit || null,
+          }).catch((err) => {
+            console.error('[Usage] Failed to record rerank usage:', err);
+          });
+        }
+
+        // Log request
+        logRequest({
+          apiTokenId: req.apiTokenId || null,
+          userId: req.userId || null,
+          modelName,
+          resolvedModel: model.name,
+          method: 'POST',
+          path: '/v1/rerank',
+          statusCode: 200,
+          requestBody: req.body,
+          responseBody: data,
+          inputTokens,
+          outputTokens: 0,
+          latencyMs,
+          errorMessage: null,
+          userAgent: req.headers['user-agent'] || null,
+          ipAddress: req.ip || null,
+          stream: false,
+        }).catch(() => {});
+
+        res.json(data);
+        return;
+
+      } catch (error) {
+        console.error(`[Failover] Rerank endpoint ${url} connection failed:`, error instanceof Error ? error.message : error);
+        await recordEndpointFailure(endpoint.endpointUrl);
+        lastError = error instanceof Error ? error.message : 'Connection failed';
+        continue;
+      }
+    }
+
+    // ---- All endpoints failed ----
+    const latencyMs = Date.now() - startTime;
+    console.error(`[Failover] All ${endpoints.length} endpoints failed for rerank model "${model.name}"`);
+    res.status(503).json({
+      error: {
+        type: 'service_unavailable',
+        message: `All ${endpoints.length} endpoint(s) failed. Please try again later.`,
+      },
+    });
+
+    logRequest({
+      apiTokenId: req.apiTokenId || null,
+      userId: req.userId || null,
+      modelName,
+      resolvedModel: model.name,
+      method: 'POST',
+      path: '/v1/rerank',
+      statusCode: 503,
+      requestBody: req.body,
+      responseBody: null,
+      inputTokens: null,
+      outputTokens: null,
+      latencyMs,
+      errorMessage: lastError || 'All endpoints failed',
+      userAgent: req.headers['user-agent'] || null,
+      ipAddress: req.ip || null,
+      stream: false,
+    }).catch(() => {});
+
+  } catch (error) {
+    console.error('Rerank proxy error:', error);
+    const latencyMs = Date.now() - startTime;
+
+    if (!res.headersSent) {
+      res.status(500).json({ error: { type: 'server_error', message: 'Failed to process rerank request' } });
+    }
+
+    logRequest({
+      apiTokenId: req.apiTokenId || null,
+      userId: req.userId || null,
+      modelName: req.body?.model || 'unknown',
+      resolvedModel: null,
+      method: 'POST',
+      path: '/v1/rerank',
       statusCode: 500,
       requestBody: req.body,
       responseBody: null,
