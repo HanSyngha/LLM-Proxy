@@ -75,6 +75,7 @@ model Model {
   name             String   @unique
   displayName      String   @map("display_name")
   alias            String?  @unique
+  upstreamModelName String? @map("upstream_model_name")
   endpointUrl      String   @map("endpoint_url")
   apiKey           String?  @map("api_key")
   extraHeaders     Json?    @map("extra_headers")
@@ -162,6 +163,8 @@ model UsageLog {
   @@index([userId, timestamp])
   @@index([modelId, timestamp])
   @@index([apiTokenId, timestamp])
+  @@index([userId, modelId, timestamp])
+  @@index([deptname, timestamp])
   @@map("usage_logs")
 }
 
@@ -188,6 +191,8 @@ model DailyUsageStat {
   @@index([userId])
   @@index([modelId])
   @@index([apiTokenId])
+  @@index([date, userId])
+  @@index([date, deptname])
   @@map("daily_usage_stats")
 }
 
@@ -222,6 +227,8 @@ model RequestLog {
   @@index([statusCode])
   @@index([timestamp])
   @@index([userId, timestamp])
+  @@index([apiTokenId, timestamp])
+  @@index([statusCode, timestamp])
   @@map("request_logs")
 }
 
@@ -280,6 +287,26 @@ model AuditLog {
   @@index([timestamp])
   @@index([targetType])
   @@map("audit_logs")
+}
+
+// ============================================
+// Department Budget / Rate Limit
+// ============================================
+model DeptBudget {
+  id                       String   @id @default(uuid())
+  deptname                 String   @unique
+  monthlyOutputTokenBudget Int      @map("monthly_output_token_budget")
+  rpmLimit                 Int?     @map("rpm_limit")
+  tpmLimit                 Int?     @map("tpm_limit")
+  tphLimit                 Int?     @map("tph_limit")
+  tpdLimit                 Int?     @map("tpd_limit")
+  enabled                  Boolean  @default(true)
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  @@index([deptname])
+  @@index([enabled])
+  @@map("dept_budgets")
 }
 
 // ============================================

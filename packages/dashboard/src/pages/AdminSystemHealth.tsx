@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
@@ -132,13 +133,15 @@ export default function AdminSystemHealth() {
     queryFn: () => api.admin.stats.latency(),
   });
 
+  const [checkingModelId, setCheckingModelId] = useState<string | null>(null);
   const checkEndpointMut = useMutation({
-    mutationFn: (modelId: string) => api.admin.system.checkEndpoint(modelId),
+    mutationFn: (modelId: string) => { setCheckingModelId(modelId); return api.admin.system.checkEndpoint(modelId); },
     onSuccess: () => {
+      setCheckingModelId(null);
       queryClient.invalidateQueries({ queryKey: ['admin', 'system', 'endpoints'] });
       console.log('엔드포인트 확인 완료');
     },
-    onError: () => console.log('엔드포인트 확인 실패'),
+    onError: () => { setCheckingModelId(null); console.log('엔드포인트 확인 실패'); },
   });
 
   const checkAllMut = useMutation({
@@ -272,7 +275,7 @@ export default function AdminSystemHealth() {
                         disabled={checkEndpointMut.isPending}
                         className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded transition-colors disabled:opacity-50"
                       >
-                        확인
+                        {checkingModelId === endpoint.modelId ? <Loader2 className="w-3 h-3 animate-spin inline" /> : '확인'}
                       </button>
                     </td>
                   </tr>

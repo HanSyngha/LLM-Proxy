@@ -8,6 +8,7 @@ import { adminStatsRoutes } from './admin-stats.routes.js';
 import { adminLogsRoutes } from './admin-logs.routes.js';
 import { adminSystemRoutes } from './admin-system.routes.js';
 import { adminRateLimitsRoutes } from './admin-rate-limits.routes.js';
+import { adminDeptBudgetsRoutes } from './admin-dept-budgets.routes.js';
 
 export const adminRoutes = Router();
 adminRoutes.use(authenticateToken);
@@ -21,6 +22,7 @@ adminRoutes.use('/stats', adminStatsRoutes);
 adminRoutes.use('/logs', adminLogsRoutes);
 adminRoutes.use('/system', adminSystemRoutes);
 adminRoutes.use('/rate-limits', adminRateLimitsRoutes);
+adminRoutes.use('/dept-budgets', adminDeptBudgetsRoutes);
 
 // ============================================
 // Admin Management

@@ -162,31 +162,31 @@ adminUsersRoutes.post('/:id/ban', requireWriteAccess, async (req: AuthenticatedR
       return;
     }
 
-    const user = await prisma.user.update({
-      where: { id },
-      data: {
-        isBanned: true,
-        bannedReason: reason || null,
-      },
-    });
-
-    // Disable all user tokens
-    await prisma.apiToken.updateMany({
-      where: { userId: id },
-      data: { enabled: false },
-    });
-
-    await prisma.auditLog.create({
-      data: {
-        adminId: req.adminId || undefined,
-        loginid: req.user!.loginid,
-        action: 'BAN_USER',
-        target: id,
-        targetType: 'User',
-        details: { bannedLoginid: existing.loginid, reason: reason || null },
-        ipAddress: req.ip,
-      },
-    });
+    // Use transaction for atomicity: ban user + disable tokens + audit log
+    const [user] = await prisma.$transaction([
+      prisma.user.update({
+        where: { id },
+        data: {
+          isBanned: true,
+          bannedReason: reason || null,
+        },
+      }),
+      prisma.apiToken.updateMany({
+        where: { userId: id },
+        data: { enabled: false },
+      }),
+      prisma.auditLog.create({
+        data: {
+          adminId: req.adminId || undefined,
+          loginid: req.user!.loginid,
+          action: 'BAN_USER',
+          target: id,
+          targetType: 'User',
+          details: { bannedLoginid: existing.loginid, reason: reason || null },
+          ipAddress: req.ip,
+        },
+      }),
+    ]);
 
     res.json({ user, message: 'User banned and all tokens disabled' });
   } catch (error) {

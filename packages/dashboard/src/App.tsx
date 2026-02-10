@@ -18,6 +18,7 @@ import AdminManagement from './pages/AdminManagement';
 import AdminAuditLog from './pages/AdminAuditLog';
 import AdminHolidays from './pages/AdminHolidays';
 import AdminLLMTest from './pages/AdminLLMTest';
+import AdminDeptBudgets from './pages/AdminDeptBudgets';
 
 // ==================== Types ====================
 interface User {
@@ -181,6 +182,7 @@ export default function App() {
                     <Route path="/admin/audit" element={<AdminRoute><AdminAuditLog /></AdminRoute>} />
                     <Route path="/admin/holidays" element={<AdminRoute><AdminHolidays /></AdminRoute>} />
                     <Route path="/admin/llm-test" element={<AdminRoute><AdminLLMTest /></AdminRoute>} />
+                    <Route path="/admin/dept-budgets" element={<AdminRoute><AdminDeptBudgets /></AdminRoute>} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Layout>

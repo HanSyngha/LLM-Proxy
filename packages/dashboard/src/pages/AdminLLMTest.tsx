@@ -170,16 +170,6 @@ function TestPairDialog({
                 placeholder="GPT-4o 품질 테스트"
               />
             </div>
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">설명</label>
-              <input
-                type="text"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none"
-                placeholder="테스트 설명"
-              />
-            </div>
           </div>
 
           {/* Test Model */}
@@ -404,7 +394,6 @@ function PairResultCharts({ pairId }: { pairId: string }) {
 function buildFormPayload(form: TestPairFormData): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     name: form.name,
-    description: form.description || undefined,
     testModelName: form.testModelName,
     testEndpoint: form.testEndpoint,
     questionerModelName: form.questionerModelName,
@@ -460,9 +449,11 @@ export default function AdminLLMTest() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['llmTest'] }),
   });
 
+  const [runningPairId, setRunningPairId] = useState<string | null>(null);
   const runTestMut = useMutation({
-    mutationFn: (id: string) => api.llmTest.runTest(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['llmTest'] }),
+    mutationFn: (id: string) => { setRunningPairId(id); return api.llmTest.runTest(id); },
+    onSuccess: () => { setRunningPairId(null); queryClient.invalidateQueries({ queryKey: ['llmTest'] }); },
+    onError: () => setRunningPairId(null),
   });
 
   const toggleMut = useMutation({
@@ -567,7 +558,7 @@ export default function AdminLLMTest() {
                     className="p-2 text-blue-500 hover:bg-blue-50 rounded transition-colors disabled:opacity-50"
                     title="수동 실행"
                   >
-                    {runTestMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                    {runningPairId === pair.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
                   </button>
                   <button
                     onClick={() => toggleMut.mutate({ id: pair.id, enabled: !pair.enabled })}

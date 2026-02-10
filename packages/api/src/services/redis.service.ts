@@ -86,7 +86,7 @@ export async function incrementUsage(
 
 export async function getMonthlyOutputTokens(
   redis: Redis,
-  entityType: 'user' | 'token',
+  entityType: 'user' | 'token' | 'dept',
   entityId: string
 ): Promise<number> {
   const now = new Date();
@@ -98,7 +98,7 @@ export async function getMonthlyOutputTokens(
 
 export async function incrementMonthlyOutputTokens(
   redis: Redis,
-  entityType: 'user' | 'token',
+  entityType: 'user' | 'token' | 'dept',
   entityId: string,
   tokens: number
 ): Promise<number> {

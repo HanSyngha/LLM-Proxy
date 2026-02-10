@@ -730,7 +730,7 @@ proxyRoutes.post('/chat/completions', authenticateApiToken, checkRateLimit, asyn
     }
 
     // Budget check
-    const budgetCheck = await checkBudget(req.userId!, req.apiTokenId || null);
+    const budgetCheck = await checkBudget(req.userId!, req.apiTokenId || null, req.user?.deptname);
     if (!budgetCheck.allowed) {
       res.status(429).json({
         error: { type: 'budget_exceeded', message: budgetCheck.reason },
@@ -739,10 +739,11 @@ proxyRoutes.post('/chat/completions', authenticateApiToken, checkRateLimit, asyn
     }
 
     // Get endpoints (parent + subModels) for round-robin and failover
+    // upstreamModelName overrides what model name is sent to the upstream LLM provider
     const endpoints = await getModelEndpoints(model.id, {
       endpointUrl: model.endpointUrl,
       apiKey: model.apiKey,
-      modelName: model.name,
+      modelName: model.upstreamModelName || model.name,
       extraHeaders: model.extraHeaders as Record<string, string> | null,
     });
     const startIdx = await getRoundRobinIndex(model.id, endpoints.length);
@@ -938,7 +939,7 @@ proxyRoutes.post('/embeddings', authenticateApiToken, checkRateLimit, async (req
     }
 
     // Budget check
-    const budgetCheck = await checkBudget(req.userId!, req.apiTokenId || null);
+    const budgetCheck = await checkBudget(req.userId!, req.apiTokenId || null, req.user?.deptname);
     if (!budgetCheck.allowed) {
       res.status(429).json({
         error: { type: 'budget_exceeded', message: budgetCheck.reason },
@@ -950,7 +951,7 @@ proxyRoutes.post('/embeddings', authenticateApiToken, checkRateLimit, async (req
     const endpoints = await getModelEndpoints(model.id, {
       endpointUrl: model.endpointUrl,
       apiKey: model.apiKey,
-      modelName: model.name,
+      modelName: model.upstreamModelName || model.name,
       extraHeaders: model.extraHeaders as Record<string, string> | null,
     });
     const startIdx = await getRoundRobinIndex(model.id, endpoints.length);

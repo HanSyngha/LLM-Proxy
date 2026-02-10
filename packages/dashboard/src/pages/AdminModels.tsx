@@ -47,6 +47,7 @@ interface ModelFormData {
   name: string;
   displayName: string;
   alias: string;
+  upstreamModelName: string;
   endpointUrl: string;
   apiKey: string;
   extraHeaders: string;
@@ -58,6 +59,7 @@ const emptyForm: ModelFormData = {
   name: '',
   displayName: '',
   alias: '',
+  upstreamModelName: '',
   endpointUrl: '',
   apiKey: '',
   extraHeaders: '{}',
@@ -147,6 +149,17 @@ function ModelDialog({
               className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none"
               placeholder="gpt4o"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Upstream 모델명</label>
+            <input
+              type="text"
+              value={form.upstreamModelName}
+              onChange={(e) => setForm({ ...form, upstreamModelName: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none"
+              placeholder="비워두면 모델 이름과 동일"
+            />
+            <p className="mt-1 text-xs text-gray-400">LLM 제공자에게 전달되는 모델명. vLLM 등에서 실제 호스팅되는 이름이 다를 때 설정</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">엔드포인트 URL *</label>
@@ -289,6 +302,7 @@ export default function AdminModels() {
         name: formData.name,
         displayName: formData.displayName,
         alias: formData.alias || undefined,
+        upstreamModelName: formData.upstreamModelName || undefined,
         endpointUrl: formData.endpointUrl,
         apiKey: formData.apiKey || undefined,
         extraHeaders: formData.extraHeaders ? JSON.parse(formData.extraHeaders) : undefined,
@@ -308,9 +322,10 @@ export default function AdminModels() {
       api.admin.models.update(id, {
         name: formData.name,
         displayName: formData.displayName,
-        alias: formData.alias || undefined,
+        alias: formData.alias || null,
+        upstreamModelName: formData.upstreamModelName || null,
         endpointUrl: formData.endpointUrl,
-        apiKey: formData.apiKey || undefined,
+        apiKey: formData.apiKey || null,
         extraHeaders: formData.extraHeaders ? JSON.parse(formData.extraHeaders) : undefined,
         maxTokens: formData.maxTokens ? parseInt(formData.maxTokens) : undefined,
         enabled: formData.enabled,
@@ -385,7 +400,7 @@ export default function AdminModels() {
       [ids[index], ids[newIndex]] = [ids[newIndex], ids[index]];
       reorderMut.mutate(ids);
     },
-    [models, reorderMut]
+    [models, reorderMut.mutate]
   );
 
   if (error) {
@@ -489,6 +504,7 @@ export default function AdminModels() {
             name: editModel.name,
             displayName: editModel.displayName,
             alias: editModel.alias || '',
+            upstreamModelName: (editModel as any).upstreamModelName || '',
             endpointUrl: editModel.endpointUrl,
             apiKey: editModel.apiKey || '',
             extraHeaders: editModel.extraHeaders ? JSON.stringify(editModel.extraHeaders, null, 2) : '{}',

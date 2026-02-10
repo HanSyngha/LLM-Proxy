@@ -241,6 +241,22 @@ export const admin = {
     list: (params?: { loginid?: string; action?: string; targetType?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) =>
       api.get('/admin/audit', { params }).then((r) => r.data),
   },
+
+  // ---- Department Budgets ----
+  deptBudgets: {
+    list: () => api.get('/admin/dept-budgets').then((r) => r.data),
+
+    departments: () => api.get('/admin/dept-budgets/departments').then((r) => r.data),
+
+    create: (data: { deptname: string; monthlyOutputTokenBudget: number; rpmLimit?: number | null; tpmLimit?: number | null; tphLimit?: number | null; tpdLimit?: number | null }) =>
+      api.post('/admin/dept-budgets', data).then((r) => r.data),
+
+    update: (id: string, data: { monthlyOutputTokenBudget?: number; rpmLimit?: number | null; tpmLimit?: number | null; tphLimit?: number | null; tpdLimit?: number | null; enabled?: boolean }) =>
+      api.put(`/admin/dept-budgets/${id}`, data).then((r) => r.data),
+
+    delete: (id: string) =>
+      api.delete(`/admin/dept-budgets/${id}`).then((r) => r.data),
+  },
 };
 
 // ==================== Holidays ====================

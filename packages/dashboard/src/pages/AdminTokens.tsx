@@ -81,10 +81,10 @@ function TokenDetailModal({
   const rateLimitsMut = useMutation({
     mutationFn: () =>
       api.admin.tokens.setRateLimits(token.id, {
-        rpmLimit: rpmLimit.trim() ? parseInt(rpmLimit) : null,
-        tpmLimit: tpmLimit.trim() ? parseInt(tpmLimit) : null,
-        tphLimit: tphLimit.trim() ? parseInt(tphLimit) : null,
-        tpdLimit: tpdLimit.trim() ? parseInt(tpdLimit) : null,
+        rpmLimit: rpmLimit.trim() ? (parseInt(rpmLimit) || null) : null,
+        tpmLimit: tpmLimit.trim() ? (parseInt(tpmLimit) || null) : null,
+        tphLimit: tphLimit.trim() ? (parseInt(tphLimit) || null) : null,
+        tpdLimit: tpdLimit.trim() ? (parseInt(tpdLimit) || null) : null,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'tokens'] });

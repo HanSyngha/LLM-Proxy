@@ -95,6 +95,7 @@ adminModelsRoutes.post('/', requireWriteAccess, async (req: AuthenticatedRequest
       name,
       displayName,
       alias,
+      upstreamModelName,
       endpointUrl,
       apiKey,
       extraHeaders,
@@ -104,6 +105,7 @@ adminModelsRoutes.post('/', requireWriteAccess, async (req: AuthenticatedRequest
       name?: string;
       displayName?: string;
       alias?: string;
+      upstreamModelName?: string | null;
       endpointUrl?: string;
       apiKey?: string;
       extraHeaders?: Record<string, string>;
@@ -140,6 +142,7 @@ adminModelsRoutes.post('/', requireWriteAccess, async (req: AuthenticatedRequest
         name,
         displayName,
         alias: alias || undefined,
+        upstreamModelName: upstreamModelName || undefined,
         endpointUrl,
         apiKey: apiKey || undefined,
         extraHeaders: extraHeaders || undefined,
@@ -219,6 +222,7 @@ adminModelsRoutes.put('/:id', requireWriteAccess, async (req: AuthenticatedReque
       name,
       displayName,
       alias,
+      upstreamModelName,
       endpointUrl,
       apiKey,
       extraHeaders,
@@ -228,6 +232,7 @@ adminModelsRoutes.put('/:id', requireWriteAccess, async (req: AuthenticatedReque
       name?: string;
       displayName?: string;
       alias?: string | null;
+      upstreamModelName?: string | null;
       endpointUrl?: string;
       apiKey?: string | null;
       extraHeaders?: Record<string, string> | null;
@@ -265,6 +270,7 @@ adminModelsRoutes.put('/:id', requireWriteAccess, async (req: AuthenticatedReque
     if (name !== undefined) data.name = name;
     if (displayName !== undefined) data.displayName = displayName;
     if (alias !== undefined) data.alias = alias || null;
+    if (upstreamModelName !== undefined) data.upstreamModelName = upstreamModelName || null;
     if (endpointUrl !== undefined) data.endpointUrl = endpointUrl;
     if (apiKey !== undefined) data.apiKey = apiKey || null;
     if (extraHeaders !== undefined) data.extraHeaders = extraHeaders;

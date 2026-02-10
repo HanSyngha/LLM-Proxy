@@ -15,6 +15,7 @@ import {
   FlaskConical,
   Shield,
   ClipboardList,
+  Building2,
   LogOut,
   Menu,
   X,
@@ -49,6 +50,7 @@ const adminNavItems: NavItem[] = [
   { label: '시스템', path: '/admin/system', icon: <Server size={18} /> },
   { label: '휴일 관리', path: '/admin/holidays', icon: <Calendar size={18} /> },
   { label: 'LLM Test', path: '/admin/llm-test', icon: <FlaskConical size={18} /> },
+  { label: '부서별 제한', path: '/admin/dept-budgets', icon: <Building2 size={18} /> },
   { label: '관리자', path: '/admin/management', icon: <Shield size={18} /> },
   { label: 'Audit Log', path: '/admin/audit', icon: <ClipboardList size={18} /> },
 ];
@@ -67,6 +69,7 @@ const pageTitles: Record<string, string> = {
   '/admin/system': '시스템 상태',
   '/admin/holidays': '휴일 관리',
   '/admin/llm-test': 'LLM Test',
+  '/admin/dept-budgets': '부서별 토큰 제한',
   '/admin/management': '관리자 관리',
   '/admin/audit': 'Audit Log',
 };

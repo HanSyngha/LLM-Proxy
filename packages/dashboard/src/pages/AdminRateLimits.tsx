@@ -73,7 +73,7 @@ export default function AdminRateLimits() {
   });
 
   const tokensWithOverrides: TokenOverride[] = (tokensData?.tokens ?? []).filter(
-    (t: TokenOverride) => t.rpmLimit || t.tpmLimit || t.tphLimit || t.tpdLimit
+    (t: TokenOverride) => t.rpmLimit != null || t.tpmLimit != null || t.tphLimit != null || t.tpdLimit != null
   );
 
   if (error) {
@@ -224,28 +224,28 @@ export default function AdminRateLimits() {
                     </td>
                     <td className="py-2.5 px-4 text-gray-600">{token.user?.loginid || '-'}</td>
                     <td className="py-2.5 px-4 text-right">
-                      {token.rpmLimit ? (
+                      {token.rpmLimit != null ? (
                         <span className="px-2 py-0.5 bg-brand-50 text-brand-700 rounded text-xs font-medium">
                           {token.rpmLimit.toLocaleString()}
                         </span>
                       ) : '-'}
                     </td>
                     <td className="py-2.5 px-4 text-right">
-                      {token.tpmLimit ? (
+                      {token.tpmLimit != null ? (
                         <span className="px-2 py-0.5 bg-brand-50 text-brand-700 rounded text-xs font-medium">
                           {token.tpmLimit.toLocaleString()}
                         </span>
                       ) : '-'}
                     </td>
                     <td className="py-2.5 px-4 text-right">
-                      {token.tphLimit ? (
+                      {token.tphLimit != null ? (
                         <span className="px-2 py-0.5 bg-brand-50 text-brand-700 rounded text-xs font-medium">
                           {token.tphLimit.toLocaleString()}
                         </span>
                       ) : '-'}
                     </td>
                     <td className="py-2.5 px-4 text-right">
-                      {token.tpdLimit ? (
+                      {token.tpdLimit != null ? (
                         <span className="px-2 py-0.5 bg-brand-50 text-brand-700 rounded text-xs font-medium">
                           {token.tpdLimit.toLocaleString()}
                         </span>

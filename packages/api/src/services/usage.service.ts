@@ -40,7 +40,7 @@ export async function recordUsage(params: {
         request_count = daily_usage_stats.request_count + 1,
         avg_latency_ms = CASE
           WHEN ${latencyValue}::int IS NOT NULL THEN
-            (COALESCE(daily_usage_stats.avg_latency_ms, 0) * (daily_usage_stats.request_count - 1) + ${latencyForCalc}) / daily_usage_stats.request_count
+            (COALESCE(daily_usage_stats.avg_latency_ms, 0) * (daily_usage_stats.request_count) + ${latencyForCalc}) / (daily_usage_stats.request_count + 1)
           ELSE daily_usage_stats.avg_latency_ms
         END
     `;
@@ -53,7 +53,7 @@ export async function recordUsage(params: {
         request_count = daily_usage_stats.request_count + 1,
         avg_latency_ms = CASE
           WHEN ${latencyValue}::int IS NOT NULL THEN
-            (COALESCE(daily_usage_stats.avg_latency_ms, 0) * (daily_usage_stats.request_count - 1) + ${latencyForCalc}) / daily_usage_stats.request_count
+            (COALESCE(daily_usage_stats.avg_latency_ms, 0) * (daily_usage_stats.request_count) + ${latencyForCalc}) / (daily_usage_stats.request_count + 1)
           ELSE daily_usage_stats.avg_latency_ms
         END
       WHERE date = ${today}::date AND user_id = ${userId} AND model_id = ${modelId} AND api_token_id IS NULL
@@ -75,6 +75,10 @@ export async function recordUsage(params: {
     if (apiTokenId) {
       await incrementMonthlyOutputTokens(redis, 'token', apiTokenId, outputTokens);
     }
+    // Track department usage
+    if (deptname) {
+      await incrementMonthlyOutputTokens(redis, 'dept', deptname, outputTokens);
+    }
   }
 
   // 5. Track active user
@@ -83,16 +87,30 @@ export async function recordUsage(params: {
   console.log(`[Usage] user=${loginid} model=${modelId} token=${apiTokenId ?? 'none'} tokens=${totalTokens} (in=${inputTokens}, out=${outputTokens}) latency=${latencyMs ?? 'N/A'}ms`);
 }
 
-export async function checkBudget(userId: string, tokenId: string | null): Promise<{
+export async function checkBudget(userId: string, tokenId: string | null, deptname?: string): Promise<{
   allowed: boolean;
   reason?: string;
 }> {
+  // Check department budget
+  if (deptname) {
+    const deptBudget = await prisma.deptBudget.findUnique({
+      where: { deptname },
+      select: { monthlyOutputTokenBudget: true, enabled: true },
+    });
+    if (deptBudget?.enabled && deptBudget.monthlyOutputTokenBudget) {
+      const used = await getMonthlyOutputTokens(redis, 'dept', deptname);
+      if (used >= deptBudget.monthlyOutputTokenBudget) {
+        return { allowed: false, reason: `Department "${deptname}" monthly output token limit exceeded (${used}/${deptBudget.monthlyOutputTokenBudget})` };
+      }
+    }
+  }
+
   // Check user budget
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { monthlyOutputTokenBudget: true } });
   if (user?.monthlyOutputTokenBudget) {
     const used = await getMonthlyOutputTokens(redis, 'user', userId);
     if (used >= user.monthlyOutputTokenBudget) {
-      return { allowed: false, reason: `User monthly output token budget exceeded (${used}/${user.monthlyOutputTokenBudget})` };
+      return { allowed: false, reason: `User monthly output token limit exceeded (${used}/${user.monthlyOutputTokenBudget})` };
     }
   }
 
@@ -102,7 +120,7 @@ export async function checkBudget(userId: string, tokenId: string | null): Promi
     if (token?.monthlyOutputTokenBudget) {
       const used = await getMonthlyOutputTokens(redis, 'token', tokenId);
       if (used >= token.monthlyOutputTokenBudget) {
-        return { allowed: false, reason: `API key monthly output token budget exceeded (${used}/${token.monthlyOutputTokenBudget})` };
+        return { allowed: false, reason: `API key monthly output token limit exceeded (${used}/${token.monthlyOutputTokenBudget})` };
       }
     }
   }

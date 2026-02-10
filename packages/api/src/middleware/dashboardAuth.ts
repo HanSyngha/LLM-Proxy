@@ -119,6 +119,7 @@ export async function requireSuperAdmin(req: AuthenticatedRequest, res: Response
     req.isAdmin = true;
     req.isDeveloper = false;
     req.adminRole = admin.role as 'SUPER_ADMIN';
+    req.adminId = admin.id;
     next();
   } catch (error) {
     console.error('Super admin check error:', error);
