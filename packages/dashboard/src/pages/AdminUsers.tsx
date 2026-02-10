@@ -6,7 +6,8 @@ import {
   ChevronRight,
   Ban,
   ShieldCheck,
-  DollarSign,
+  Shield,
+  Gauge,
   X,
   AlertTriangle,
   RefreshCw,
@@ -14,6 +15,18 @@ import {
   User as UserIcon,
 } from 'lucide-react';
 import { api } from '../services/api';
+
+const ROLE_LABELS: Record<string, string> = {
+  SUPER_ADMIN: '슈퍼 관리자',
+  ADMIN: '관리자',
+  VIEWER: '뷰어',
+};
+
+const ROLE_COLORS: Record<string, string> = {
+  SUPER_ADMIN: 'bg-red-100 text-red-700',
+  ADMIN: 'bg-brand-100 text-brand-700',
+  VIEWER: 'bg-gray-100 text-gray-600',
+};
 
 interface User {
   id: string;
@@ -26,6 +39,8 @@ interface User {
   isBanned: boolean;
   bannedReason?: string | null;
   monthlyOutputTokenBudget?: number | null;
+  adminRole?: string | null;
+  isDeveloper?: boolean;
   _count?: { apiTokens: number; usageLogs: number };
 }
 
@@ -41,6 +56,8 @@ function UserDetailModal({
   const [showBanInput, setShowBanInput] = useState(false);
   const [budget, setBudget] = useState('');
   const [showBudgetInput, setShowBudgetInput] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<string>('ADMIN');
+  const [showRoleInput, setShowRoleInput] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'users', userId],
@@ -53,18 +70,14 @@ function UserDetailModal({
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
       setShowBanInput(false);
       setBanReason('');
-      console.log('사용자가 차단되었습니다.');
     },
-    onError: () => console.log('사용자 차단에 실패했습니다.'),
   });
 
   const unbanMut = useMutation({
     mutationFn: () => api.admin.users.unban(userId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
-      console.log('사용자 차단이 해제되었습니다.');
     },
-    onError: () => console.log('차단 해제에 실패했습니다.'),
   });
 
   const budgetMut = useMutation({
@@ -73,14 +86,23 @@ function UserDetailModal({
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
       setShowBudgetInput(false);
       setBudget('');
-      console.log('예산이 설정되었습니다.');
     },
-    onError: () => console.log('예산 설정에 실패했습니다.'),
+  });
+
+  const setRoleMut = useMutation({
+    mutationFn: (role: string | null) => api.admin.users.setAdminRole(userId, role),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      setShowRoleInput(false);
+    },
   });
 
   const user = data?.user;
+  const adminInfo = data?.adminInfo;
   const tokens: { id: string; name: string; prefix: string; enabled: boolean; lastUsedAt?: string }[] = data?.user?.apiTokens ?? [];
   const usage = data?.usageHistory ?? [];
+  const currentAdminRole = adminInfo?.role || null;
+  const userIsDeveloper = adminInfo?.isDeveloper || false;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -143,8 +165,91 @@ function UserDetailModal({
               </div>
             </div>
 
+            {/* Admin Role Management */}
+            <div className="border-t pt-4">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-brand-500" />
+                관리자 권한
+              </h3>
+              {currentAdminRole ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2.5 py-1 text-xs rounded-full font-medium ${ROLE_COLORS[currentAdminRole] || 'bg-gray-100 text-gray-600'}`}>
+                      {ROLE_LABELS[currentAdminRole] || currentAdminRole}
+                    </span>
+                    {userIsDeveloper && (
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full font-medium">Developer</span>
+                    )}
+                  </div>
+                  {!userIsDeveloper && (
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={currentAdminRole}
+                        onChange={(e) => setRoleMut.mutate(e.target.value)}
+                        disabled={setRoleMut.isPending}
+                        className="px-3 py-1.5 text-sm border rounded-lg bg-white"
+                      >
+                        <option value="SUPER_ADMIN">슈퍼 관리자</option>
+                        <option value="ADMIN">관리자</option>
+                        <option value="VIEWER">뷰어</option>
+                      </select>
+                      <button
+                        onClick={() => setRoleMut.mutate(null)}
+                        disabled={setRoleMut.isPending}
+                        className="px-3 py-1.5 text-sm text-red-600 bg-red-50 rounded-lg hover:bg-red-100 disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {setRoleMut.isPending && <Loader2 className="w-3 h-3 animate-spin" />}
+                        권한 해제
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  {showRoleInput ? (
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedRole}
+                        onChange={(e) => setSelectedRole(e.target.value)}
+                        className="px-3 py-1.5 text-sm border rounded-lg bg-white"
+                      >
+                        <option value="ADMIN">관리자</option>
+                        <option value="VIEWER">뷰어</option>
+                        <option value="SUPER_ADMIN">슈퍼 관리자</option>
+                      </select>
+                      <button
+                        onClick={() => setRoleMut.mutate(selectedRole)}
+                        disabled={setRoleMut.isPending}
+                        className="px-3 py-1.5 text-sm bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50 flex items-center gap-1"
+                      >
+                        {setRoleMut.isPending && <Loader2 className="w-3 h-3 animate-spin" />}
+                        확인
+                      </button>
+                      <button
+                        onClick={() => setShowRoleInput(false)}
+                        className="px-3 py-1.5 text-sm text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+                      >
+                        취소
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-gray-500">일반 사용자</span>
+                      <button
+                        onClick={() => setShowRoleInput(true)}
+                        className="px-3 py-1.5 text-sm bg-brand-500 text-white rounded-lg hover:bg-brand-600 flex items-center gap-1"
+                      >
+                        <Shield className="w-3.5 h-3.5" />
+                        관리자 지정
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Actions */}
-            <div className="flex gap-3 flex-wrap">
+            <div className="flex gap-3 flex-wrap border-t pt-4">
               {user.isBanned ? (
                 <button
                   onClick={() => unbanMut.mutate()}
@@ -222,8 +327,8 @@ function UserDetailModal({
                     onClick={() => setShowBudgetInput(true)}
                     className="px-3 py-2 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600 flex items-center gap-2"
                   >
-                    <DollarSign className="w-4 h-4" />
-                    예산 설정
+                    <Gauge className="w-4 h-4" />
+                    월간 토큰 제한
                   </button>
                 )}
               </div>
@@ -366,8 +471,6 @@ export default function AdminUsers() {
                   <th className="text-left py-3 px-4 font-medium text-gray-500">로그인 ID</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">이름</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">부서</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-500">사업부</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-500">최초 접속</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">마지막 활동</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">상태</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-500">토큰 수</th>
@@ -376,7 +479,7 @@ export default function AdminUsers() {
               <tbody>
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-gray-400">
+                    <td colSpan={6} className="py-12 text-center text-gray-400">
                       검색 결과가 없습니다.
                     </td>
                   </tr>
@@ -390,15 +493,18 @@ export default function AdminUsers() {
                       <td className="py-3 px-4 font-mono text-gray-700">{user.loginid}</td>
                       <td className="py-3 px-4 text-gray-900">{user.username}</td>
                       <td className="py-3 px-4 text-gray-600">{user.deptname || '-'}</td>
-                      <td className="py-3 px-4 text-gray-600">{user.businessUnit || '-'}</td>
-                      <td className="py-3 px-4 text-gray-500 text-xs">{new Date(user.firstSeen).toLocaleDateString('ko-KR')}</td>
                       <td className="py-3 px-4 text-gray-500 text-xs">{new Date(user.lastActive).toLocaleDateString('ko-KR')}</td>
                       <td className="py-3 px-4">
-                        <div className="flex gap-1">
+                        <div className="flex gap-1 flex-wrap">
                           {user.isBanned ? (
                             <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full font-medium">차단</span>
                           ) : (
                             <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-medium">활성</span>
+                          )}
+                          {user.adminRole && (
+                            <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${ROLE_COLORS[user.adminRole] || 'bg-gray-100 text-gray-600'}`}>
+                              {ROLE_LABELS[user.adminRole] || user.adminRole}
+                            </span>
                           )}
                         </div>
                       </td>

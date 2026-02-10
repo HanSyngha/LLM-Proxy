@@ -318,7 +318,7 @@ export default function MyTokens() {
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="text-gray-500 flex items-center gap-1">
                       <Shield size={12} />
-                      월간 Output Token 예산
+                      월간 Output Token 제한
                     </span>
                     <span className="text-gray-700 font-medium">
                       {formatNumber(token.usage.monthlyOutputTokens)} / {formatNumber(token.monthlyOutputTokenBudget)}

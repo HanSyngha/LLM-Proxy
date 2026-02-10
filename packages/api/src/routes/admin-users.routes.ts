@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../index.js';
-import { AuthenticatedRequest, requireWriteAccess } from '../middleware/dashboardAuth.js';
+import { AuthenticatedRequest, requireWriteAccess, requireSuperAdmin, isDeveloper } from '../middleware/dashboardAuth.js';
 
 export const adminUsersRoutes = Router();
 
@@ -45,8 +45,20 @@ adminUsersRoutes.get('/', async (req: AuthenticatedRequest, res: Response) => {
       prisma.user.count({ where }),
     ]);
 
+    // Enrich with admin role info
+    const userLoginids = users.map(u => u.loginid);
+    const admins = await prisma.admin.findMany({
+      where: { loginid: { in: userLoginids } },
+    });
+    const adminMap = new Map(admins.map(a => [a.loginid, a.role]));
+    const enrichedUsers = users.map(u => ({
+      ...u,
+      adminRole: isDeveloper(u.loginid) ? 'SUPER_ADMIN' : (adminMap.get(u.loginid) || null),
+      isDeveloper: isDeveloper(u.loginid),
+    }));
+
     res.json({
-      users,
+      users: enrichedUsers,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -96,6 +108,11 @@ adminUsersRoutes.get('/:id', async (req: AuthenticatedRequest, res: Response) =>
       return;
     }
 
+    // Get admin info
+    const adminInfo = isDeveloper(user.loginid)
+      ? { loginid: user.loginid, role: 'SUPER_ADMIN' as const, isDeveloper: true }
+      : await prisma.admin.findUnique({ where: { loginid: user.loginid } });
+
     // Get recent usage stats (last 30 days)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -128,6 +145,7 @@ adminUsersRoutes.get('/:id', async (req: AuthenticatedRequest, res: Response) =>
 
     res.json({
       user,
+      adminInfo: adminInfo || null,
       usageHistory,
       usageSummary: {
         totalRequests: usageSummary._count.id,
@@ -286,5 +304,76 @@ adminUsersRoutes.put('/:id/budget', requireWriteAccess, async (req: Authenticate
   } catch (error) {
     console.error('Error updating user budget:', error);
     res.status(500).json({ error: 'Failed to update user budget' });
+  }
+});
+
+/**
+ * POST /admin/users/:id/set-admin-role - Set or remove admin role
+ * role: 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER' | null (null = remove admin)
+ */
+adminUsersRoutes.post('/:id/set-admin-role', requireSuperAdmin, requireWriteAccess, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body as { role: string | null };
+
+    const validRoles = ['SUPER_ADMIN', 'ADMIN', 'VIEWER'];
+    if (role !== null && !validRoles.includes(role)) {
+      res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')} or null` });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    if (isDeveloper(user.loginid)) {
+      res.status(400).json({ error: 'Cannot modify developer admin role' });
+      return;
+    }
+
+    if (user.loginid === req.user!.loginid) {
+      res.status(400).json({ error: 'Cannot modify your own admin role' });
+      return;
+    }
+
+    const previousAdmin = await prisma.admin.findUnique({ where: { loginid: user.loginid } });
+
+    let adminInfo = null;
+    if (role === null) {
+      // Remove admin
+      if (previousAdmin) {
+        await prisma.admin.delete({ where: { loginid: user.loginid } });
+      }
+    } else {
+      // Upsert admin
+      adminInfo = await prisma.admin.upsert({
+        where: { loginid: user.loginid },
+        create: { loginid: user.loginid, role: role as 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER' },
+        update: { role: role as 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER' },
+      });
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        adminId: req.adminId || undefined,
+        loginid: req.user!.loginid,
+        action: 'SET_ADMIN_ROLE',
+        target: id,
+        targetType: 'Admin',
+        details: {
+          userLoginid: user.loginid,
+          previousRole: previousAdmin?.role || null,
+          newRole: role,
+        },
+        ipAddress: req.ip,
+      },
+    });
+
+    res.json({ adminInfo, message: role ? `Admin role set to ${role}` : 'Admin role removed' });
+  } catch (error) {
+    console.error('Error setting admin role:', error);
+    res.status(500).json({ error: 'Failed to set admin role' });
   }
 });

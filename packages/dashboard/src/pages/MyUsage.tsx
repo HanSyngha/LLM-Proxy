@@ -164,7 +164,7 @@ export default function MyUsage() {
         <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
             <Shield size={18} className="text-brand-500" />
-            <h3 className="font-semibold text-gray-900">월간 Output Token 예산</h3>
+            <h3 className="font-semibold text-gray-900">월간 Output Token 제한</h3>
           </div>
           <div className="flex items-center justify-between text-sm mb-2">
             <span className="text-gray-500">사용량</span>
@@ -188,7 +188,7 @@ export default function MyUsage() {
           </div>
           {summary.budget.remaining !== null && (
             <p className="text-xs text-gray-400 mt-2">
-              남은 예산: {formatNumber(summary.budget.remaining)} tokens
+              남은 한도: {formatNumber(summary.budget.remaining)} tokens
             </p>
           )}
         </div>

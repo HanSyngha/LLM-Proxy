@@ -97,9 +97,9 @@ function TokenDetailModal({
     mutationFn: () => api.admin.tokens.setBudget(token.id, budget.trim() ? parseInt(budget) : null),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'tokens'] });
-      console.log('예산이 설정되었습니다.');
+      console.log('월간 토큰 제한이 설정되었습니다.');
     },
-    onError: () => console.log('예산 설정에 실패했습니다.'),
+    onError: () => console.log('월간 토큰 제한 설정에 실패했습니다.'),
   });
 
   const modelsMut = useMutation({
@@ -156,7 +156,7 @@ function TokenDetailModal({
             <div className="flex gap-4">
               {[
                 { key: 'limits' as const, label: '레이트 리밋' },
-                { key: 'budget' as const, label: '예산' },
+                { key: 'budget' as const, label: '월간 토큰 제한' },
                 { key: 'models' as const, label: '허용 모델' },
               ].map(({ key, label }) => (
                 <button

@@ -129,6 +129,9 @@ export const admin = {
 
     setBudget: (id: string, budget: number | null) =>
       api.put(`/admin/users/${id}/budget`, { budget }).then((r) => r.data),
+
+    setAdminRole: (id: string, role: string | null) =>
+      api.post(`/admin/users/${id}/set-admin-role`, { role }).then((r) => r.data),
   },
 
   // ---- Tokens ----

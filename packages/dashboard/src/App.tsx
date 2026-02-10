@@ -14,11 +14,9 @@ import AdminUsage from './pages/AdminUsage';
 import AdminRateLimits from './pages/AdminRateLimits';
 import AdminRequestLogs from './pages/AdminRequestLogs';
 import AdminSystemHealth from './pages/AdminSystemHealth';
-import AdminManagement from './pages/AdminManagement';
 import AdminAuditLog from './pages/AdminAuditLog';
 import AdminHolidays from './pages/AdminHolidays';
 import AdminLLMTest from './pages/AdminLLMTest';
-import AdminDeptBudgets from './pages/AdminDeptBudgets';
 
 // ==================== Types ====================
 interface User {
@@ -178,11 +176,12 @@ export default function App() {
                     <Route path="/admin/rate-limits" element={<AdminRoute><AdminRateLimits /></AdminRoute>} />
                     <Route path="/admin/logs" element={<AdminRoute><AdminRequestLogs /></AdminRoute>} />
                     <Route path="/admin/system" element={<AdminRoute><AdminSystemHealth /></AdminRoute>} />
-                    <Route path="/admin/management" element={<AdminRoute><AdminManagement /></AdminRoute>} />
                     <Route path="/admin/audit" element={<AdminRoute><AdminAuditLog /></AdminRoute>} />
                     <Route path="/admin/holidays" element={<AdminRoute><AdminHolidays /></AdminRoute>} />
                     <Route path="/admin/llm-test" element={<AdminRoute><AdminLLMTest /></AdminRoute>} />
-                    <Route path="/admin/dept-budgets" element={<AdminRoute><AdminDeptBudgets /></AdminRoute>} />
+                    {/* Redirects for removed pages */}
+                    <Route path="/admin/management" element={<Navigate to="/admin/users" replace />} />
+                    <Route path="/admin/dept-budgets" element={<Navigate to="/admin/rate-limits" replace />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Layout>
