@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { TokenAuthenticatedRequest } from './tokenAuth.js';
 import { redis, prisma } from '../index.js';
 import { todayString, toHourString, toMinuteString } from '../utils/date.js';

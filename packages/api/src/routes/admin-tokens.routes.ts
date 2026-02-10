@@ -200,6 +200,22 @@ adminTokensRoutes.patch('/:id', requireWriteAccess, async (req: AuthenticatedReq
       allowedModels?: string[];
     };
 
+    // Validate rate limit fields: null or non-negative integer
+    const rateLimitFields: Array<[string, unknown]> = [
+      ['rpmLimit', rpmLimit],
+      ['tpmLimit', tpmLimit],
+      ['tphLimit', tphLimit],
+      ['tpdLimit', tpdLimit],
+    ];
+    for (const [name, value] of rateLimitFields) {
+      if (value !== undefined && value !== null) {
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+          res.status(400).json({ error: `${name} must be a non-negative integer or null` });
+          return;
+        }
+      }
+    }
+
     const existing = await prisma.apiToken.findUnique({
       where: { id },
       include: { user: { select: { loginid: true } } },
@@ -312,6 +328,22 @@ adminTokensRoutes.put('/:id/rate-limits', requireWriteAccess, async (req: Authen
     if (!existing) {
       res.status(404).json({ error: 'Token not found' });
       return;
+    }
+
+    // Validate: each value must be null or a non-negative integer
+    const fields: Array<[string, unknown]> = [
+      ['rpmLimit', rpmLimit],
+      ['tpmLimit', tpmLimit],
+      ['tphLimit', tphLimit],
+      ['tpdLimit', tpdLimit],
+    ];
+    for (const [name, value] of fields) {
+      if (value !== undefined && value !== null) {
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+          res.status(400).json({ error: `${name} must be a non-negative integer or null` });
+          return;
+        }
+      }
     }
 
     const data: Record<string, unknown> = {};
